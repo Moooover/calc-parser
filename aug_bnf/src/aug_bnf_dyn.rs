@@ -83,14 +83,36 @@ impl<T: std::fmt::Debug + Display + Eq + PartialEq + Hash> GrammarParser<T> {
     rules: &'a Vec<Vec<T>>,
     items: &'b [&'a T],
   ) -> Option<(Vec<AstNode<'a, T>>, &'b [&'a T])> {
+    println!(
+      "Checking {}",
+      items
+        .iter()
+        .fold("".to_string(), |s, item| s + &format!("{}", item) + ", ")
+    );
     'outer: for rule in rules.iter() {
       let mut children: Vec<AstNode<'a, T>> = Vec::new();
       let mut item_seq = items;
+      println!(
+        "rule {} ({})",
+        rule
+          .iter()
+          .fold("".to_string(), |s, item| s + &format!("{}", item) + ", "),
+        rules.len()
+      );
 
       for sym in rule.iter() {
-        if let Some(rules) = self.productions.get(sym) {
+        if let Some(sym_rules) = self.productions.get(sym) {
+          println!("Trying rule {}", sym);
+          println!(
+            "{}",
+            sym_rules.iter().fold("".to_string(), |s, rule| {
+              rule
+                .iter()
+                .fold(s + ", ", |s, item| s + &format!("{}", item) + ", ")
+            })
+          );
           // This is an intermediate node.
-          if let Some((ast_nodes, new_items)) = self.parse_slice(rules, items) {
+          if let Some((ast_nodes, new_items)) = self.parse_slice(sym_rules, items) {
             children.push(AstNode::Intermediate((
               sym,
               Vec::from(&items[..items.len() - new_items.len()]),
@@ -101,6 +123,7 @@ impl<T: std::fmt::Debug + Display + Eq + PartialEq + Hash> GrammarParser<T> {
             continue 'outer;
           }
         } else {
+          println!("matching terminal {}", sym);
           if *sym == self.end_of_stream {
             if item_seq.len() == 0 {
               return Some((vec![AstNode::Terminal(&self.end_of_stream)], item_seq));

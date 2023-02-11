@@ -2,9 +2,18 @@ mod aug_bnf_dyn;
 
 use aug_bnf_dyn::{GrammarParser, Production};
 
+pub fn fmt2<T: std::fmt::Display>(v: &Vec<T>) {
+  for (i, c) in v.iter().enumerate() {
+    if i > 0 {
+      print!(" ");
+    }
+    print!("{}", c);
+  }
+}
+
 fn main() {
-  let mut p = GrammarParser::<char>::new('I');
-  p.add_production(Production::new('I', vec!['S']));
+  let mut p = GrammarParser::<char>::new('I', '$');
+  p.add_production(Production::new('I', vec!['S', '$']));
   p.add_production(Production::new('S', vec![]));
   p.add_production(Production::new('S', vec!['a', 'A', 'b', 'S']));
   p.add_production(Production::new('S', vec!['b', 'B', 'a', 'S']));
@@ -24,7 +33,13 @@ fn main() {
     }
 
     let v: Vec<char> = buffer.chars().collect();
-    println!("{}: {}", buffer, p.parse(v.iter()));
+    if let Some(ast_nodes) = p.parse(v.iter()) {
+      print!("{}: ", buffer);
+      fmt2(&ast_nodes);
+      println!("");
+    } else {
+      println!("Failed to parse!");
+    }
     buffer.clear();
   }
 }

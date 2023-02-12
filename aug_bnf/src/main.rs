@@ -25,15 +25,9 @@ fn main() {
   println!("{}", p);
 
   aug_bnf_impl::aug_bnf! {
-    <S> => <A> <B> ;
-    <A> => 'a' <B> ;
-    <B> => 'b' ;
-  };
-
-  aug_bnf_impl::aug_bnf! {
-    <S> => <A> <B> ;
-    <A> => 'a' <B> ;
-    <B> => 'b' ;
+    <S> => <A> <B>;
+    <A> => 'a' <B>;
+    <B> => 'b';
   };
 
   let mut buffer: String = "".to_string();

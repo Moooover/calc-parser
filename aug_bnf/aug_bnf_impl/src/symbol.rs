@@ -35,6 +35,18 @@ impl Operator {
   }
 }
 
+impl Operator {
+  pub fn should_separate(prev_chars: &str, next_char: char) -> bool {
+    let mut chars = prev_chars.chars();
+    match chars.next() {
+      Some(':') => chars.next().is_some() || next_char != ':',
+      Some('=') => chars.next().is_some() || next_char != '>',
+      Some(_) => true,
+      None => true,
+    }
+  }
+}
+
 impl Display for Operator {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(f, "{}", self.to_string())
@@ -133,11 +145,20 @@ impl Symbol {
         Punct(punct) => {
           let prev_chars: (String, Option<Span>) = prev_chars.unwrap_or(("".to_string(), None));
           let (mut cur_chars, prev_span) = prev_chars;
-          cur_chars += &String::from(punct.as_char());
+
           let cur_span = match prev_span {
-            Some(span) => span.join(token.span()).unwrap(),
+            Some(span) => {
+              if Operator::should_separate(&cur_chars, punct.as_char()) {
+                syms.push(Symbol::parse_op(&cur_chars, span));
+                cur_chars = "".to_string();
+                token.span()
+              } else {
+                span.join(token.span()).unwrap()
+              }
+            }
             None => token.span(),
           };
+          cur_chars += &String::from(punct.as_char());
 
           if punct.spacing() == proc_macro::Spacing::Joint {
             // There will be a character following this.

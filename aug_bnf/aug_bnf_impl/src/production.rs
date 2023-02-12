@@ -7,25 +7,15 @@ use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
 
-#[derive(Debug, PartialEq, Eq)]
-enum ParseErrorType {
-  // End of stream was reached.
-  EndOfStream,
-  // An unexpected token was found.
-  UnexpectedToken,
-}
-
 #[derive(Debug)]
 struct ParseError {
-  err_type: ParseErrorType,
   message: String,
   span: Span,
 }
 
 impl ParseError {
-  pub fn new(err_type: ParseErrorType, message: &str, span: Span) -> Self {
+  pub fn new(message: &str, span: Span) -> Self {
     Self {
-      err_type,
       message: String::from(message),
       span,
     }
@@ -61,7 +51,7 @@ fn peek_symbol_or<'a, I: Iterator<Item = Symbol>>(
   if let Some(next) = iter.peek() {
     return Ok(next);
   } else {
-    return ParseError::new(ParseErrorType::EndOfStream, message, span).into();
+    return ParseError::new(message, span).into();
   }
 }
 
@@ -73,7 +63,7 @@ fn next_symbol_or<I: Iterator<Item = Symbol>>(
   if let Some(next) = iter.next() {
     return Ok(next);
   } else {
-    return ParseError::new(ParseErrorType::EndOfStream, message, span).into();
+    return ParseError::new(message, span).into();
   }
 }
 
@@ -83,45 +73,57 @@ macro_rules! expect_symbol {
     match sym.sym {
       $expected => sym.span,
       _ => {
-        return ParseError::new(ParseErrorType::UnexpectedToken, $message, sym.span).into();
+        return ParseError::new($message, sym.span).into();
       }
     }
   }};
 }
 
-// <TerminalSym> => <Ident>
 #[derive(Clone, Debug)]
 struct TerminalSym {
   pub name: String,
   pub span: Span,
 }
 
-impl TerminalSym {
+// <TerminalSym> => <Ident>
+#[derive(Clone, Debug)]
+enum Terminal {
+  EndOfStream(Span),
+  Sym(TerminalSym),
+}
+
+impl Terminal {
+  pub fn span(&self) -> Span {
+    match self {
+      Terminal::EndOfStream(span) => *span,
+      Terminal::Sym(sym) => sym.span,
+    }
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
     let sym = next_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
 
     match sym.sym {
-      SymbolT::Ident(ident) => Ok(TerminalSym {
+      SymbolT::Ident(ident) => Ok(Terminal::Sym(TerminalSym {
         name: ident,
         span: sym.span,
-      }),
-      SymbolT::Literal(literal) => Ok(TerminalSym {
+      })),
+      SymbolT::Literal(literal) => Ok(Terminal::Sym(TerminalSym {
         name: literal,
         span: sym.span,
-      }),
-      _ => ParseError::new(
-        ParseErrorType::UnexpectedToken,
-        "Expected terminal symbol.",
-        sym.span,
-      )
-      .into(),
+      })),
+      SymbolT::Op(Operator::DollarSign) => Ok(Terminal::EndOfStream(sym.span)),
+      _ => ParseError::new("Expected terminal symbol.", sym.span).into(),
     }
   }
 }
 
-impl Display for TerminalSym {
+impl Display for Terminal {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    write!(f, "{}", self.name)
+    match self {
+      Terminal::EndOfStream(_span) => write!(f, "$"),
+      Terminal::Sym(sym) => write!(f, "{}", sym.name),
+    }
   }
 }
 
@@ -147,12 +149,7 @@ impl ProductionName {
     let production_name = match &sym.sym {
       SymbolT::Ident(ident) => ident.to_string(),
       _ => {
-        return ParseError::new(
-          ParseErrorType::UnexpectedToken,
-          "Expected production rule name.",
-          sym.span,
-        )
-        .into();
+        return ParseError::new("Expected production rule name.", sym.span).into();
       }
     };
 
@@ -182,7 +179,7 @@ impl Display for ProductionName {
 #[derive(Debug)]
 enum ProductionRule {
   Intermediate(Weak<Production>),
-  Terminal(TerminalSym),
+  Terminal(Terminal),
   UnresolvedIntermediate(ProductionName),
 }
 
@@ -190,7 +187,7 @@ impl ProductionRule {
   pub fn span(&self) -> Span {
     match self {
       Self::Intermediate(intermediate) => intermediate.upgrade().unwrap().span,
-      Self::Terminal(terminal) => terminal.span,
+      Self::Terminal(terminal) => terminal.span(),
       Self::UnresolvedIntermediate(name) => name.span,
     }
   }
@@ -204,7 +201,7 @@ impl ProductionRule {
       SymbolT::Op(Operator::BeginProd) => Ok(ProductionRule::UnresolvedIntermediate(
         ProductionName::parse(iter)?,
       )),
-      _ => Ok(ProductionRule::Terminal(TerminalSym::parse(iter)?)),
+      _ => Ok(ProductionRule::Terminal(Terminal::parse(iter)?)),
     }
   }
 }
@@ -247,12 +244,7 @@ impl ProductionRules {
       match sym.sym {
         SymbolT::Op(Operator::Semicolon) => {
           if rules.len() == 0 {
-            return ParseError::new(
-              ParseErrorType::UnexpectedToken,
-              "Unexpected ';', expect production rule.",
-              sym.span,
-            )
-            .into();
+            return ParseError::new("Unexpected ';', expect production rule.", sym.span).into();
           } else {
             iter.next();
             return Ok(vec![Self {
@@ -348,7 +340,7 @@ impl Grammar {
           productions.insert(production.name.name.to_string(), Rc::new(production));
         }
         Err(err) => {
-          abort!(err.span, err.message);
+          err.raise();
         }
       }
     }

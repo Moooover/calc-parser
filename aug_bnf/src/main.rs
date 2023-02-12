@@ -25,7 +25,7 @@ fn main() {
   println!("{}", p);
 
   aug_bnf_impl::aug_bnf! {
-    <S> => <A> <B>;
+    <S> => <A> <B> $;
     <A> => 'a' <B>;
     <B> => 'b';
   };

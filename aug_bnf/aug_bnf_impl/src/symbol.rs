@@ -12,7 +12,7 @@ pub enum Operator {
   // ;
   Semicolon,
   // $
-  VarPrefix,
+  DollarSign,
   // <
   BeginProd,
   // >
@@ -27,7 +27,7 @@ impl Operator {
       Operator::Arrow => "=>",
       Operator::Colon => ":",
       Operator::Semicolon => ";",
-      Operator::VarPrefix => "$",
+      Operator::DollarSign => "$",
       Operator::BeginProd => "<",
       Operator::EndProd => ">",
       Operator::Scope => "::",
@@ -103,7 +103,7 @@ impl Symbol {
       "=>" => Symbol::new(SymbolT::Op(Operator::Arrow), span),
       ":" => Symbol::new(SymbolT::Op(Operator::Colon), span),
       ";" => Symbol::new(SymbolT::Op(Operator::Semicolon), span),
-      "$" => Symbol::new(SymbolT::Op(Operator::VarPrefix), span),
+      "$" => Symbol::new(SymbolT::Op(Operator::DollarSign), span),
       "<" => Symbol::new(SymbolT::Op(Operator::BeginProd), span),
       ">" => Symbol::new(SymbolT::Op(Operator::EndProd), span),
       "::" => Symbol::new(SymbolT::Op(Operator::Scope), span),

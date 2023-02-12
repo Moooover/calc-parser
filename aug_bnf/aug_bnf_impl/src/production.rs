@@ -127,15 +127,72 @@ impl Display for Terminal {
   }
 }
 
-// <ProductionName> => "<" ( <Alias> ":" )? <Ident> ">"
 #[derive(Debug)]
 struct ProductionName {
-  pub name: String,
+  name: String,
+  span: Span,
+}
+
+impl ProductionName {
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
+    let begin_span = expect_symbol!(
+      iter,
+      SymbolT::Op(Operator::BeginProd),
+      "Expected production rule name, which must begin with a '<'.",
+      Span::call_site()
+    );
+
+    let sym = next_symbol_or(iter, "Expected production name.", Span::call_site())?;
+
+    let prod_name = match sym.sym {
+      SymbolT::Ident(ident) => Ok(ident),
+      _ => ParseError::new("Expected production name.", sym.span).into(),
+    }?;
+
+    let end_span = expect_symbol!(
+      iter,
+      SymbolT::Op(Operator::EndProd),
+      "Expected '>' at the end of production rule name.",
+      Span::call_site()
+    );
+
+    Ok(ProductionName {
+      name: prod_name,
+      span: begin_span.join(sym.span).unwrap().join(end_span).unwrap(),
+    })
+  }
+}
+
+impl Display for ProductionName {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(f, "<{}>", self.name)
+  }
+}
+
+#[derive(Debug)]
+enum ProductionRefT {
+  Resolved(Weak<Production>),
+  Unresolved(String),
+}
+
+impl Display for ProductionRefT {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    match self {
+      ProductionRefT::Resolved(production) => write!(f, "{}", production.upgrade().unwrap().name),
+      ProductionRefT::Unresolved(name) => write!(f, "<{}?>", name),
+    }
+  }
+}
+
+// <ProductionRef> => "<" ( <Alias> ":" )? <Ident> ">"
+#[derive(Debug)]
+struct ProductionRef {
+  pub production: ProductionRefT,
   pub alias: Option<String>,
   pub span: Span,
 }
 
-impl ProductionName {
+impl ProductionRef {
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
     let begin_span = expect_symbol!(
       iter,
@@ -161,7 +218,7 @@ impl ProductionName {
 
     match colon_or_end.sym {
       SymbolT::Op(Operator::EndProd) => Ok(Self {
-        name: production_name,
+        production: ProductionRefT::Unresolved(production_name),
         alias: None,
         span: begin_span
           .join(sym.span)
@@ -191,7 +248,7 @@ impl ProductionName {
         );
 
         Ok(Self {
-          name: production_name,
+          production: ProductionRefT::Unresolved(production_name),
           alias: Some(alias),
           span: begin_span
             .join(alias_span)
@@ -209,30 +266,28 @@ impl ProductionName {
   }
 }
 
-impl Display for ProductionName {
+impl Display for ProductionRef {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     if let Some(alias) = &self.alias {
-      write!(f, "<{}: {}>", alias, self.name)
+      write!(f, "<{}: {}>", alias, self.production)
     } else {
-      write!(f, "<{}>", self.name)
+      write!(f, "<{}>", self.production)
     }
   }
 }
 
-// <ProductionRule> => <ProductionName> | <TerminalSym>
+// <ProductionRule> => <ProductionRef> | <TerminalSym>
 #[derive(Debug)]
 enum ProductionRule {
-  Intermediate(Weak<Production>),
+  Intermediate(ProductionRef),
   Terminal(Terminal),
-  UnresolvedIntermediate(ProductionName),
 }
 
 impl ProductionRule {
   pub fn span(&self) -> Span {
     match self {
-      Self::Intermediate(intermediate) => intermediate.upgrade().unwrap().span,
+      Self::Intermediate(intermediate) => intermediate.span,
       Self::Terminal(terminal) => terminal.span(),
-      Self::UnresolvedIntermediate(name) => name.span,
     }
   }
 }
@@ -242,9 +297,9 @@ impl ProductionRule {
     let sym = peek_symbol_or(iter, "Unexpected end of stream.", Span::call_site())?;
 
     match sym.sym {
-      SymbolT::Op(Operator::BeginProd) => Ok(ProductionRule::UnresolvedIntermediate(
-        ProductionName::parse(iter)?,
-      )),
+      SymbolT::Op(Operator::BeginProd) => {
+        Ok(ProductionRule::Intermediate(ProductionRef::parse(iter)?))
+      }
       _ => Ok(ProductionRule::Terminal(Terminal::parse(iter)?)),
     }
   }
@@ -254,13 +309,10 @@ impl Display for ProductionRule {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       ProductionRule::Intermediate(intermediate) => {
-        write!(f, "{}", intermediate.upgrade().unwrap().name)
+        write!(f, "{}", intermediate)
       }
       ProductionRule::Terminal(term) => {
         write!(f, "{}", term)
-      }
-      ProductionRule::UnresolvedIntermediate(sym) => {
-        write!(f, "<{}?>", sym)
       }
     }
   }
@@ -359,7 +411,7 @@ impl Display for Production {
     write!(f, "{} => ", self.name)?;
     for (i, rule) in self.rules.iter().enumerate() {
       if i != 0 {
-        write!(f, "\n{}", " ".repeat(self.name.name.len() + 4))?;
+        write!(f, "\n{}", " ".repeat(self.name.name.len() + 6))?;
       }
       write!(f, "{}", rule)?;
     }
@@ -415,15 +467,24 @@ impl Grammar {
 
         for rule in prod.rules.iter() {
           let rule = match rule {
-            ProductionRule::Intermediate(_intermedidate) => unreachable!(),
-            ProductionRule::Terminal(term) => ProductionRule::Terminal(term.clone()),
-            ProductionRule::UnresolvedIntermediate(name) => {
-              if let Some(prod) = self.productions.get(&name.name) {
-                ProductionRule::Intermediate(Rc::downgrade(prod))
-              } else {
-                abort!(name.span, format!("Unknown production rule {}", name));
+            ProductionRule::Intermediate(intermediate) => match &intermediate.production {
+              ProductionRefT::Unresolved(name) => {
+                if let Some(prod) = self.productions.get(name) {
+                  ProductionRule::Intermediate(ProductionRef {
+                    production: ProductionRefT::Resolved(Rc::downgrade(prod)),
+                    alias: intermediate.alias.clone(),
+                    span: intermediate.span,
+                  })
+                } else {
+                  abort!(
+                    intermediate.span,
+                    format!("Unknown production rule {}", name)
+                  );
+                }
               }
-            }
+              ProductionRefT::Resolved(_) => unreachable!(),
+            },
+            ProductionRule::Terminal(term) => ProductionRule::Terminal(term.clone()),
           };
           new_rule_list.push(rule);
         }
@@ -434,11 +495,14 @@ impl Grammar {
       for prod in new_rules_list.iter() {
         for rule in prod.rules.iter() {
           match rule {
-            ProductionRule::Intermediate(intermediate) => {
-              *all_keys
-                .get_mut(&Weak::upgrade(&intermediate).unwrap().name.name)
-                .unwrap() += 1;
-            }
+            ProductionRule::Intermediate(intermediate) => match &intermediate.production {
+              ProductionRefT::Resolved(res) => {
+                *all_keys
+                  .get_mut(&Weak::upgrade(&res).unwrap().name.name)
+                  .unwrap() += 1;
+              }
+              ProductionRefT::Unresolved(_) => unreachable!(),
+            },
             _ => {}
           }
         }

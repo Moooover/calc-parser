@@ -46,12 +46,6 @@ mod tests {
 
   #[test]
   fn it_works() {
-    aug_bnf!(
-      fn answer() -> i32 {
-        42
-      }
-    );
-    let result = bnswer();
-    assert_eq!(result, 42);
+    aug_bnf!(test);
   }
 }

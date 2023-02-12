@@ -24,6 +24,14 @@ fn main() {
 
   println!("{}", p);
 
+  aug_bnf_impl::aug_bnf! {
+    S => A B: {
+      println!("parsed guys: {} and {}", #A, #B);
+    }
+    A => 'a'
+    B => 'b'
+  };
+
   let mut buffer: String = "".to_string();
   while let Ok(_) = std::io::stdin().read_line(&mut buffer) {
     buffer.remove(buffer.len() - 1);

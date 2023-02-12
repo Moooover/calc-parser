@@ -1,4 +1,4 @@
-#![feature(proc_macro_span)]
+#![feature(get_mut_unchecked, proc_macro_span)]
 
 extern crate proc_macro;
 mod production;

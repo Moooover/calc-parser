@@ -1,8 +1,9 @@
 use proc_macro::Span;
 use proc_macro_error::abort;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
+use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
 
@@ -89,7 +90,7 @@ macro_rules! expect_symbol {
 }
 
 // <TerminalSym> => <Ident>
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct TerminalSym {
   pub name: String,
   pub span: Span,
@@ -179,23 +180,23 @@ impl Display for ProductionName {
 
 // <ProductionRule> => <ProductionName> | <TerminalSym>
 #[derive(Debug)]
-enum ProductionRule<'a> {
-  Intermediate(&'a Production<'a>),
+enum ProductionRule {
+  Intermediate(Weak<Production>),
   Terminal(TerminalSym),
   UnresolvedIntermediate(ProductionName),
 }
 
-impl<'a> ProductionRule<'a> {
+impl ProductionRule {
   pub fn span(&self) -> Span {
     match self {
-      Self::Intermediate(intermediate) => intermediate.span,
+      Self::Intermediate(intermediate) => intermediate.upgrade().unwrap().span,
       Self::Terminal(terminal) => terminal.span,
       Self::UnresolvedIntermediate(name) => name.span,
     }
   }
 }
 
-impl<'a> ProductionRule<'a> {
+impl ProductionRule {
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let sym = peek_symbol_or(iter, "Unexpected end of stream.", Span::call_site())?;
 
@@ -208,11 +209,11 @@ impl<'a> ProductionRule<'a> {
   }
 }
 
-impl<'a> Display for ProductionRule<'a> {
+impl Display for ProductionRule {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       ProductionRule::Intermediate(intermediate) => {
-        write!(f, "<{}>", intermediate.name)
+        write!(f, "<{}>", intermediate.upgrade().unwrap().name)
       }
       ProductionRule::Terminal(term) => {
         write!(f, "{}", term)
@@ -226,12 +227,16 @@ impl<'a> Display for ProductionRule<'a> {
 
 // <ProductionRules> => <ProductionRule> <ProductionRules>?
 #[derive(Debug)]
-struct ProductionRules<'a> {
-  pub rules: Vec<ProductionRule<'a>>,
+struct ProductionRules {
+  pub rules: Vec<ProductionRule>,
   pub span: Span,
 }
 
-impl<'a> ProductionRules<'a> {
+impl ProductionRules {
+  pub fn new(rules: Vec<ProductionRule>, span: Span) -> Self {
+    Self { rules, span }
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Vec<Self>> {
     let mut rules = Vec::new();
     let mut span = None;
@@ -269,7 +274,7 @@ impl<'a> ProductionRules<'a> {
   }
 }
 
-impl<'a> Display for ProductionRules<'a> {
+impl Display for ProductionRules {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     for rule in self.rules.iter() {
       write!(f, "{} ", rule)?;
@@ -280,17 +285,17 @@ impl<'a> Display for ProductionRules<'a> {
 
 // <Production> => <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
-struct Production<'a> {
+struct Production {
   name: ProductionName,
-  rules: Vec<ProductionRules<'a>>,
+  rules: Vec<ProductionRules>,
   span: Span,
 }
 
-impl<'a> Production<'a> {
+impl Production {
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let production_name = ProductionName::parse(iter)?;
 
-    expect_symbol!(
+    let arrow_span = expect_symbol!(
       iter,
       SymbolT::Op(Operator::Arrow),
       "Expected \"=>\" to follow production name.",
@@ -300,6 +305,8 @@ impl<'a> Production<'a> {
     let production_rules = ProductionRules::parse(iter)?;
     let span = production_name
       .span
+      .join(arrow_span)
+      .unwrap()
       .join(iter_span(production_rules.iter().map(|rule| rule.span)))
       .unwrap();
 
@@ -311,7 +318,7 @@ impl<'a> Production<'a> {
   }
 }
 
-impl<'a> Display for Production<'a> {
+impl Display for Production {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     write!(f, "{} => ", self.name)?;
     for (i, rule) in self.rules.iter().enumerate() {
@@ -325,21 +332,20 @@ impl<'a> Display for Production<'a> {
 }
 
 #[derive(Debug)]
-pub struct Grammar<'a> {
-  productions: HashMap<String, Production<'a>>,
-  start_rule: &'a str,
+pub struct Grammar {
+  productions: HashMap<String, Rc<Production>>,
+  start_rule: String,
 }
 
-impl<'a> Grammar<'a> {
+impl Grammar {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
-    let mut productions: HashMap<String, Production<'a>> = HashMap::new();
-    let start_rule: Option<&'a str> = Some("hi");
+    let mut productions: HashMap<String, Rc<Production>> = HashMap::new();
 
     let mut token_iter = token_stream.into_iter().peekable();
     while let Some(_) = token_iter.peek() {
       match Production::parse(&mut token_iter) {
         Ok(production) => {
-          productions.insert(production.name.name.to_string(), production);
+          productions.insert(production.name.name.to_string(), Rc::new(production));
         }
         Err(err) => {
           abort!(err.span, err.message);
@@ -347,14 +353,93 @@ impl<'a> Grammar<'a> {
       }
     }
 
-    Self {
+    let mut grammar = Self {
       productions,
-      start_rule: start_rule.unwrap(),
+      start_rule: "".to_string(),
+    };
+
+    grammar.resolve_refs();
+    return grammar;
+  }
+
+  fn resolve_refs(&mut self) {
+    let key_set: HashSet<_> = self.productions.keys().map(|k| k.to_string()).collect();
+    let mut all_keys: HashMap<_, _> = self
+      .productions
+      .keys()
+      .map(|k| (k.to_string(), 0u32))
+      .collect();
+
+    for key in key_set.iter() {
+      let production = self.productions.get(key).unwrap();
+      let mut new_rules_list = Vec::new();
+
+      for prod in production.rules.iter() {
+        let mut new_rule_list = Vec::new();
+
+        for rule in prod.rules.iter() {
+          let rule = match rule {
+            ProductionRule::Intermediate(_intermedidate) => unreachable!(),
+            ProductionRule::Terminal(term) => ProductionRule::Terminal(term.clone()),
+            ProductionRule::UnresolvedIntermediate(name) => {
+              if let Some(prod) = self.productions.get(&name.name) {
+                ProductionRule::Intermediate(Rc::downgrade(prod))
+              } else {
+                abort!(name.span, format!("Unknown production rule {}", name));
+              }
+            }
+          };
+          new_rule_list.push(rule);
+        }
+
+        new_rules_list.push(ProductionRules::new(new_rule_list, prod.span));
+      }
+
+      for prod in new_rules_list.iter() {
+        for rule in prod.rules.iter() {
+          match rule {
+            ProductionRule::Intermediate(intermediate) => {
+              *all_keys
+                .get_mut(&Weak::upgrade(&intermediate).unwrap().name.name)
+                .unwrap() += 1;
+            }
+            _ => {}
+          }
+        }
+      }
+      unsafe {
+        Rc::get_mut_unchecked(self.productions.get_mut(key).unwrap()).rules = new_rules_list;
+      }
     }
+
+    let unreffed_keys: Vec<_> = all_keys.iter().filter(|(_key, &cnt)| cnt == 0).collect();
+    if unreffed_keys.len() == 0 {
+      abort!(
+        Span::call_site(),
+        "No start production found, all productions are referenced."
+      );
+    }
+    if unreffed_keys.len() > 1 {
+      abort!(
+        Span::call_site(),
+        format!(
+          "Production rules {} have no references. Expected only 1, which is the start rule.",
+          unreffed_keys.iter().fold("".to_string(), |s, (key, _cnt)| {
+            if s == "" {
+              key.to_string()
+            } else {
+              s + ", " + &key
+            }
+          })
+        )
+      )
+    }
+
+    self.start_rule = unreffed_keys[0].0.to_string();
   }
 }
 
-impl<'a> Display for Grammar<'a> {
+impl Display for Grammar {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     for (i, (_rule_name, rule)) in self.productions.iter().enumerate() {
       write!(f, "{}", rule)?;

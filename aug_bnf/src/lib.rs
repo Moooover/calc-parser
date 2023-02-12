@@ -46,6 +46,10 @@ mod tests {
 
   #[test]
   fn it_works() {
-    aug_bnf!(test);
+    aug_bnf_impl::aug_bnf! {
+      <S> => <A> <B> ;
+      <A> => 'a' <B> ;
+      <B> => 'b' ;
+    };
   }
 }

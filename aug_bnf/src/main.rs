@@ -25,11 +25,11 @@ fn main() {
   println!("{}", p);
 
   aug_bnf_impl::aug_bnf! {
-    S => A B: {
-      println!("parsed guys: {} and {}", #A, #B);
+    <S> => <A> tmp_name: <B> {
+      println!("parsed guys: {} and {}", #A, #tmp_name);
     }
-    A => 'a'
-    B => 'b'
+    <A> => 'a' <B>
+    <B> => 'b' Test::Sym
   };
 
   let mut buffer: String = "".to_string();

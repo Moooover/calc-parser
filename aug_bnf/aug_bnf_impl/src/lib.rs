@@ -17,7 +17,8 @@ pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let grammar = Grammar::from(list);
 
   return TokenStream::from(quote! {
-    println!("Done!");
+    let var = $grammar;
+    println!("{:?}", var);
   });
   // let token_stream = list.iter().map(|sym| {
   //   let s = format!("{}", sym);

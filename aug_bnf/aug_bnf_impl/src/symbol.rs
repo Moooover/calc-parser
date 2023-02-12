@@ -9,6 +9,8 @@ pub enum Operator {
   Arrow,
   // :
   Colon,
+  // ;
+  Semicolon,
   // $
   VarPrefix,
   // <
@@ -24,6 +26,7 @@ impl Operator {
     match self {
       Operator::Arrow => "=>",
       Operator::Colon => ":",
+      Operator::Semicolon => ";",
       Operator::VarPrefix => "$",
       Operator::BeginProd => "<",
       Operator::EndProd => ">",
@@ -87,6 +90,7 @@ impl Symbol {
     match input {
       "=>" => Symbol::new(SymbolT::Op(Operator::Arrow), span),
       ":" => Symbol::new(SymbolT::Op(Operator::Colon), span),
+      ";" => Symbol::new(SymbolT::Op(Operator::Semicolon), span),
       "$" => Symbol::new(SymbolT::Op(Operator::VarPrefix), span),
       "<" => Symbol::new(SymbolT::Op(Operator::BeginProd), span),
       ">" => Symbol::new(SymbolT::Op(Operator::EndProd), span),

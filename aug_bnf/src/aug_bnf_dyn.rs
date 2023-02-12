@@ -36,18 +36,38 @@ pub enum AstNode<'a, T: Display> {
   Intermediate((&'a T, Vec<&'a T>, Vec<AstNode<'a, T>>)),
 }
 
-impl<'a, T: Display> Display for AstNode<'a, T> {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<'a, T: Display> AstNode<'a, T> {
+  fn write_to(&self, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
     match self {
       AstNode::Terminal(t) => {
-        write!(f, "{}", t)
+        write!(f, "{}{} ", "  ".repeat(depth), t)
       }
       AstNode::Intermediate((t, substr, node)) => {
-        write!(f, "{} (", t)?;
+        write!(f, "{}{} (", "  ".repeat(depth), t)?;
         fmt2(substr, f)?;
-        write!(f, ")")
+        write!(f, ")")?;
+
+        node.iter().try_for_each(|node| {
+          write!(f, "\n")?;
+          node.write_to(f, depth + 1)
+        })
       }
     }
+  }
+}
+
+impl<'a, T: Display> Clone for AstNode<'a, T> {
+  fn clone(&self) -> Self {
+    match self {
+      AstNode::Terminal(term) => AstNode::Terminal(term),
+      AstNode::Intermediate((sym, v1, v2)) => AstNode::Intermediate((sym, v1.clone(), v2.clone())),
+    }
+  }
+}
+
+impl<'a, T: Display> Display for AstNode<'a, T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    self.write_to(f, 0)
   }
 }
 
@@ -66,9 +86,12 @@ impl<T: std::fmt::Debug + Display + Eq + PartialEq + Hash> GrammarParser<T> {
     }
   }
 
-  fn root_rule(&self) -> &Vec<Vec<T>> {
+  fn root_rule(&self) -> &[T] {
     if let Some(rule) = self.productions.get(&self.root) {
-      return rule;
+      if rule.len() != 1 {
+        panic!("Root rule has length != 1 ({})", rule.len());
+      }
+      return &rule[0][..];
     }
     panic!("Root {} not found!", self.root);
   }
@@ -80,77 +103,99 @@ impl<T: std::fmt::Debug + Display + Eq + PartialEq + Hash> GrammarParser<T> {
 
   fn parse_slice<'a, 'b>(
     &'a self,
-    rules: &'a Vec<Vec<T>>,
+    rule_name: &'a T,
+    rule: &'a [T],
     items: &'b [&'a T],
-  ) -> Option<(Vec<AstNode<'a, T>>, &'b [&'a T])> {
+  ) -> Vec<(AstNode<'a, T>, &'b [&'a T])> {
+    if rule.len() == 0 {
+      return vec![(
+        AstNode::Intermediate((rule_name, Vec::new(), Vec::new())),
+        items,
+      )];
+    }
+
     println!(
-      "Checking {}",
-      items
+      "rule {}",
+      rule
         .iter()
         .fold("".to_string(), |s, item| s + &format!("{}", item) + ", ")
     );
-    'outer: for rule in rules.iter() {
-      let mut children: Vec<AstNode<'a, T>> = Vec::new();
-      let mut item_seq = items;
-      println!(
-        "rule {} ({})",
-        rule
-          .iter()
-          .fold("".to_string(), |s, item| s + &format!("{}", item) + ", "),
-        rules.len()
-      );
 
-      for sym in rule.iter() {
-        if let Some(sym_rules) = self.productions.get(sym) {
-          println!("Trying rule {}", sym);
-          println!(
-            "{}",
-            sym_rules.iter().fold("".to_string(), |s, rule| {
-              rule
-                .iter()
-                .fold(s + ", ", |s, item| s + &format!("{}", item) + ", ")
-            })
-          );
-          // This is an intermediate node.
-          if let Some((ast_nodes, new_items)) = self.parse_slice(sym_rules, items) {
-            children.push(AstNode::Intermediate((
-              sym,
-              Vec::from(&items[..items.len() - new_items.len()]),
-              ast_nodes,
-            )));
-            item_seq = new_items;
-          } else {
-            continue 'outer;
-          }
-        } else {
-          println!("matching terminal {}", sym);
-          if *sym == self.end_of_stream {
-            if item_seq.len() == 0 {
-              return Some((vec![AstNode::Terminal(&self.end_of_stream)], item_seq));
-            } else {
-              continue 'outer;
-            }
-          }
-          // This is a terminal node.
-          if item_seq.len() > 0 && rule[0] == *sym {
-            children.push(AstNode::Terminal(sym));
-            item_seq = &item_seq[1..];
-          } else {
-            continue 'outer;
-          }
+    let sym = &rule[0];
+    if let Some(sym_rules) = self.productions.get(sym) {
+      // This is an intermediate node.
+      let mut return_vals = Vec::new();
+
+      for irule in sym_rules {
+        let possibilities = self.parse_slice(sym, &irule[..], items);
+        for (node, rem_items) in possibilities {
+          return_vals.extend(
+            self
+              .parse_slice(rule_name, &rule[1..], rem_items)
+              .into_iter()
+              .map(|(s_node, rem_items)| {
+                let new_node = match (node.clone(), s_node) {
+                  (AstNode::Intermediate(a), AstNode::Intermediate(mut child_a)) => {
+                    a.1.iter().for_each(|c| {
+                      child_a.1.insert(0, c);
+                    });
+                    child_a.2.insert(0, AstNode::Intermediate(a));
+                    AstNode::Intermediate(child_a)
+                  }
+                  (_, _) => unreachable!(),
+                };
+                (new_node, rem_items)
+              }),
+          )
         }
       }
 
-      return Some((children, item_seq));
+      return return_vals;
+    } else {
+      // This is a terminal node.
+      println!("matching terminal {}", sym);
+
+      if *sym == self.end_of_stream {
+        if items.len() == 0 {
+          return vec![(
+            AstNode::Intermediate((
+              rule_name,
+              Vec::from(items),
+              vec![AstNode::Terminal(&self.end_of_stream)],
+            )),
+            items,
+          )];
+        }
+      } else if items.len() > 0 && *sym == *items[0] {
+        let node = AstNode::Terminal(sym);
+
+        return self
+          .parse_slice(rule_name, &rule[1..], &items[1..])
+          .into_iter()
+          .map(|(s_node, rem_items)| {
+            let new_node = match (node.clone(), s_node) {
+              (AstNode::Terminal(node), AstNode::Intermediate(mut child_a)) => {
+                child_a.1.insert(0, node);
+                child_a.2.insert(0, AstNode::Terminal(node));
+                AstNode::Intermediate((rule_name, child_a.1, child_a.2))
+              }
+              (_, _) => unreachable!(),
+            };
+            (new_node, rem_items)
+          })
+          .collect();
+      }
     }
 
-    return None;
+    return Vec::new();
   }
 
-  pub fn parse<'a, I: Iterator<Item = &'a T>>(&'a self, iter: I) -> Option<Vec<AstNode<'a, T>>> {
+  pub fn parse<'a, I: Iterator<Item = &'a T>>(&'a self, iter: I) -> Option<AstNode<'a, T>> {
     let items: Vec<&'a T> = iter.collect();
-    if let Some((ast_node, _rem)) = self.parse_slice(self.root_rule(), &items[..]) {
-      return Some(ast_node);
+    let mut possibilities = self.parse_slice(&self.root, self.root_rule(), &items[..]);
+    if possibilities.len() > 0 {
+      let (node, _rem) = possibilities.remove(0);
+      return Some(node);
     } else {
       return None;
     }

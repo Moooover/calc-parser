@@ -33,10 +33,8 @@ fn main() {
     }
 
     let v: Vec<char> = buffer.chars().collect();
-    if let Some(ast_nodes) = p.parse(v.iter()) {
-      print!("{}: ", buffer);
-      fmt2(&ast_nodes);
-      println!("");
+    if let Some(ast_node) = p.parse(v.iter()) {
+      println!("{}:\n{}", buffer, ast_node);
     } else {
       println!("Failed to parse!");
     }

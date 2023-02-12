@@ -1,6 +1,7 @@
 use proc_macro::Span;
 use proc_macro_error::abort;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
 
 use crate::symbol::{Operator, Symbol, SymbolT};
@@ -76,15 +77,15 @@ fn next_symbol_or<I: Iterator<Item = Symbol>>(
 }
 
 macro_rules! expect_symbol {
-  ($iter:expr, $expected:pat, $message:expr, $span:expr) => {
+  ($iter:expr, $expected:pat, $message:expr, $span:expr) => {{
     let sym = next_symbol_or($iter, $message, $span)?;
     match sym.sym {
-      $expected => {}
+      $expected => sym.span,
       _ => {
         return ParseError::new(ParseErrorType::UnexpectedToken, $message, sym.span).into();
       }
     }
-  };
+  }};
 }
 
 // <TerminalSym> => <Ident>
@@ -117,6 +118,12 @@ impl TerminalSym {
   }
 }
 
+impl Display for TerminalSym {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.name)
+  }
+}
+
 // <ProductionName> => "<" <Ident> ">"
 #[derive(Debug)]
 struct ProductionName {
@@ -127,7 +134,7 @@ struct ProductionName {
 
 impl ProductionName {
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
-    expect_symbol!(
+    let begin_span = expect_symbol!(
       iter,
       SymbolT::Op(Operator::BeginProd),
       "Expected production rule name, which must begin with a '<'.",
@@ -148,7 +155,7 @@ impl ProductionName {
       }
     };
 
-    expect_symbol!(
+    let end_span = expect_symbol!(
       iter,
       SymbolT::Op(Operator::EndProd),
       "Expected '>' at end of production rule name.",
@@ -159,8 +166,14 @@ impl ProductionName {
       name: production_name,
       // You can't alias the production definition.
       alias: None,
-      span: sym.span,
+      span: begin_span.join(sym.span).unwrap().join(end_span).unwrap(),
     })
+  }
+}
+
+impl Display for ProductionName {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "<{}>", self.name)
   }
 }
 
@@ -191,6 +204,22 @@ impl<'a> ProductionRule<'a> {
         ProductionName::parse(iter)?,
       )),
       _ => Ok(ProductionRule::Terminal(TerminalSym::parse(iter)?)),
+    }
+  }
+}
+
+impl<'a> Display for ProductionRule<'a> {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    match self {
+      ProductionRule::Intermediate(intermediate) => {
+        write!(f, "<{}>", intermediate.name)
+      }
+      ProductionRule::Terminal(term) => {
+        write!(f, "{}", term)
+      }
+      ProductionRule::UnresolvedIntermediate(sym) => {
+        write!(f, "<{}?>", sym)
+      }
     }
   }
 }
@@ -240,6 +269,15 @@ impl<'a> ProductionRules<'a> {
   }
 }
 
+impl<'a> Display for ProductionRules<'a> {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for rule in self.rules.iter() {
+      write!(f, "{} ", rule)?;
+    }
+    Ok(())
+  }
+}
+
 // <Production> => <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
 struct Production<'a> {
@@ -273,21 +311,36 @@ impl<'a> Production<'a> {
   }
 }
 
+impl<'a> Display for Production<'a> {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{} => ", self.name)?;
+    for (i, rule) in self.rules.iter().enumerate() {
+      if i != 0 {
+        write!(f, "\n{}", " ".repeat(self.name.name.len() + 4))?;
+      }
+      write!(f, "{}", rule)?;
+    }
+    Ok(())
+  }
+}
+
 #[derive(Debug)]
 pub struct Grammar<'a> {
-  productions: HashMap<&'a str, Production<'a>>,
+  productions: HashMap<String, Production<'a>>,
   start_rule: &'a str,
 }
 
 impl<'a> Grammar<'a> {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
-    let productions: HashMap<&'a str, Production<'a>> = HashMap::new();
+    let mut productions: HashMap<String, Production<'a>> = HashMap::new();
     let start_rule: Option<&'a str> = Some("hi");
 
     let mut token_iter = token_stream.into_iter().peekable();
     while let Some(_) = token_iter.peek() {
       match Production::parse(&mut token_iter) {
-        Ok(production) => {}
+        Ok(production) => {
+          productions.insert(production.name.name.to_string(), production);
+        }
         Err(err) => {
           abort!(err.span, err.message);
         }
@@ -298,5 +351,17 @@ impl<'a> Grammar<'a> {
       productions,
       start_rule: start_rule.unwrap(),
     }
+  }
+}
+
+impl<'a> Display for Grammar<'a> {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for (i, (_rule_name, rule)) in self.productions.iter().enumerate() {
+      write!(f, "{}", rule)?;
+      if i != self.productions.len() - 1 {
+        write!(f, "\n")?;
+      }
+    }
+    Ok(())
   }
 }

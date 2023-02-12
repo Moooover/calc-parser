@@ -15,7 +15,7 @@ use symbol::Symbol;
 pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let list = Symbol::from_stream(tokens);
   let grammar = Grammar::from(list);
-  let s = format!("{:?}", grammar);
+  let s = format!("{}", grammar);
 
   return TokenStream::from(quote! {
     let var = #s;

@@ -426,9 +426,9 @@ impl Grammar {
           "Production rules {} have no references. Expected only 1, which is the start rule.",
           unreffed_keys.iter().fold("".to_string(), |s, (key, _cnt)| {
             if s == "" {
-              key.to_string()
+              format!("<{}>", key)
             } else {
-              s + ", " + &key
+              format!("{}, <{}>", s, key)
             }
           })
         )

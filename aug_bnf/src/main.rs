@@ -30,6 +30,12 @@ fn main() {
     <B> => 'b' ;
   };
 
+  aug_bnf_impl::aug_bnf! {
+    <S> => <A> <B> ;
+    <A> => 'a' <B> ;
+    <B> => 'b' ;
+  };
+
   let mut buffer: String = "".to_string();
   while let Ok(_) = std::io::stdin().read_line(&mut buffer) {
     buffer.remove(buffer.len() - 1);

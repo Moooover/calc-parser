@@ -136,7 +136,7 @@ impl<T: std::fmt::Debug + Display + Eq + PartialEq + Hash> GrammarParser<T> {
               .map(|(s_node, rem_items)| {
                 let new_node = match (node.clone(), s_node) {
                   (AstNode::Intermediate(a), AstNode::Intermediate(mut child_a)) => {
-                    a.1.iter().for_each(|c| {
+                    a.1.iter().rev().for_each(|c| {
                       child_a.1.insert(0, c);
                     });
                     child_a.2.insert(0, AstNode::Intermediate(a));

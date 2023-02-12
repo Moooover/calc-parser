@@ -103,6 +103,10 @@ impl TerminalSym {
         name: ident,
         span: sym.span,
       }),
+      SymbolT::Literal(literal) => Ok(TerminalSym {
+        name: literal,
+        span: sym.span,
+      }),
       _ => ParseError::new(
         ParseErrorType::UnexpectedToken,
         "Expected terminal symbol.",
@@ -278,7 +282,7 @@ pub struct Grammar<'a> {
 impl<'a> Grammar<'a> {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
     let productions: HashMap<&'a str, Production<'a>> = HashMap::new();
-    let start_rule: Option<&'a str> = None;
+    let start_rule: Option<&'a str> = Some("hi");
 
     let mut token_iter = token_stream.into_iter().peekable();
     while let Some(_) = token_iter.peek() {

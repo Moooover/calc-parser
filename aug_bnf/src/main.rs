@@ -27,7 +27,7 @@ fn main() {
   aug_bnf_impl::aug_bnf! {
     <S> => <A> <B> ;
     <A> => 'a' <B> ;
-    <B> => 'b' Test::Sym ;
+    <B> => 'b' ;
   };
 
   let mut buffer: String = "".to_string();

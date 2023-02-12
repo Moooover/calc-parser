@@ -15,10 +15,11 @@ use symbol::Symbol;
 pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let list = Symbol::from_stream(tokens);
   let grammar = Grammar::from(list);
+  let s = format!("{:?}", grammar);
 
   return TokenStream::from(quote! {
-    let var = $grammar;
-    println!("{:?}", var);
+    let var = #s;
+    println!("{}", var);
   });
   // let token_stream = list.iter().map(|sym| {
   //   let s = format!("{}", sym);

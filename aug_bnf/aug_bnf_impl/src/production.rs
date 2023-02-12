@@ -127,7 +127,7 @@ impl Display for Terminal {
   }
 }
 
-// <ProductionName> => "<" <Ident> ">"
+// <ProductionName> => "<" ( <Alias> ":" )? <Ident> ">"
 #[derive(Debug)]
 struct ProductionName {
   pub name: String,
@@ -153,25 +153,69 @@ impl ProductionName {
       }
     };
 
-    let end_span = expect_symbol!(
+    let colon_or_end = next_symbol_or(
       iter,
-      SymbolT::Op(Operator::EndProd),
-      "Expected '>' at end of production rule name.",
-      Span::call_site()
-    );
+      "Expected '>' at end of a production rule name.",
+      sym.span,
+    )?;
 
-    Ok(Self {
-      name: production_name,
-      // You can't alias the production definition.
-      alias: None,
-      span: begin_span.join(sym.span).unwrap().join(end_span).unwrap(),
-    })
+    match colon_or_end.sym {
+      SymbolT::Op(Operator::EndProd) => Ok(Self {
+        name: production_name,
+        alias: None,
+        span: begin_span
+          .join(sym.span)
+          .unwrap()
+          .join(colon_or_end.span)
+          .unwrap(),
+      }),
+      SymbolT::Op(Operator::Colon) => {
+        // This is an aliased rule.
+        let alias = production_name;
+        let alias_span = sym.span;
+
+        let sym = next_symbol_or(iter, "Dangling '<'", Span::call_site())?;
+
+        let production_name = match &sym.sym {
+          SymbolT::Ident(ident) => ident.to_string(),
+          _ => {
+            return ParseError::new("Expected production rule name.", sym.span).into();
+          }
+        };
+
+        let end_span = expect_symbol!(
+          iter,
+          SymbolT::Op(Operator::EndProd),
+          "Expected '>' at the end of production rule name.",
+          Span::call_site()
+        );
+
+        Ok(Self {
+          name: production_name,
+          alias: Some(alias),
+          span: begin_span
+            .join(alias_span)
+            .unwrap()
+            .join(colon_or_end.span)
+            .unwrap()
+            .join(sym.span)
+            .unwrap()
+            .join(end_span)
+            .unwrap(),
+        })
+      }
+      _ => ParseError::new("Expected '>' or ':'.", colon_or_end.span).into(),
+    }
   }
 }
 
 impl Display for ProductionName {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    write!(f, "<{}>", self.name)
+    if let Some(alias) = &self.alias {
+      write!(f, "<{}: {}>", alias, self.name)
+    } else {
+      write!(f, "<{}>", self.name)
+    }
   }
 }
 
@@ -210,7 +254,7 @@ impl Display for ProductionRule {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       ProductionRule::Intermediate(intermediate) => {
-        write!(f, "<{}>", intermediate.upgrade().unwrap().name)
+        write!(f, "{}", intermediate.upgrade().unwrap().name)
       }
       ProductionRule::Terminal(term) => {
         write!(f, "{}", term)

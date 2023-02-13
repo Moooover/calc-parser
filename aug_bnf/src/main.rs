@@ -136,72 +136,50 @@ enum States {
   ),
 }
 
+impl std::fmt::Display for States {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    write!(
+      f,
+      "{}",
+      match self {
+        States::I0 => "I0",
+        States::I1(_) => "I1",
+        States::S21(_, _) => "S21",
+        States::S22(_, _, _) => "S22",
+        States::S23(_, _, _, _) => "S23",
+        States::S24(_, _, _, _, _) => "S24",
+        States::S31(_, _) => "S31",
+        States::S32(_, _, _) => "S32",
+        States::S33(_, _, _, _) => "S33",
+        States::S34(_, _, _, _, _) => "S34",
+        States::A21(_, _) => "A21",
+        States::A22(_, _, _) => "A22",
+        States::A23(_, _, _, _) => "A23",
+        States::A24(_, _, _, _, _) => "A24",
+        States::B21(_, _) => "B21",
+        States::B22(_, _, _) => "B22",
+        States::B23(_, _, _, _) => "B23",
+        States::B24(_, _, _, _, _) => "B24",
+      }
+    )
+  }
+}
+
 #[allow(non_snake_case)]
-fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
+fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
+  let mut i = i.peekable();
   let mut states = vec![States::I0];
 
   loop {
+    println!(
+      "{}",
+      states
+        .iter()
+        .fold("".to_string(), |s, state| s + &format!("{} ", state))
+    );
     let state = states.pop().unwrap();
+    let peek_char = i.peek().unwrap_or(&'$');
 
-    // Try matching against states which don't look at the next token, i.e.
-    // don't push.
-    match state {
-      States::S24(mut res, _a, A, _b, S) => {
-        println!("S24");
-        let A = Rc::try_unwrap(A).unwrap();
-        let S = Rc::try_unwrap(S).unwrap();
-        unsafe {
-          *Rc::get_mut_unchecked(&mut res) = Some({
-            // closure from grammar
-            compose(Direction::AB, A, S)
-          });
-        }
-        // unwind.
-        continue;
-      }
-      States::S34(mut res, _b, B, _a, S) => {
-        println!("S34");
-        let B = Rc::try_unwrap(B).unwrap();
-        let S = Rc::try_unwrap(S).unwrap();
-        unsafe {
-          *Rc::get_mut_unchecked(&mut res) = Some({
-            // closure from grammar
-            compose(Direction::BA, B, S)
-          });
-        }
-        // unwind.
-        continue;
-      }
-      States::A24(mut res, _a, A, _b, S) => {
-        println!("A24");
-        let A = Rc::try_unwrap(A).unwrap();
-        let S = Rc::try_unwrap(S).unwrap();
-        unsafe {
-          *Rc::get_mut_unchecked(&mut res) = Some({
-            // closure from grammar
-            compose(Direction::AB, A, S)
-          });
-        }
-        // unwind.
-        continue;
-      }
-      States::B24(mut res, _b, B, _a, S) => {
-        println!("B24");
-        let B = Rc::try_unwrap(B).unwrap();
-        let S = Rc::try_unwrap(S).unwrap();
-        unsafe {
-          *Rc::get_mut_unchecked(&mut res) = Some({
-            // closure from grammar
-            compose(Direction::BA, B, S)
-          });
-        }
-        // unwind.
-        continue;
-      }
-      _ => {}
-    }
-
-    let peek_char = i.next().unwrap_or('$');
     match (state, peek_char) {
       (States::I0, '$') => {
         println!("I0 '$'");
@@ -267,7 +245,19 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         states.push(States::S24(res, a, A, b, sub_res.clone()));
         states.push(States::S31(sub_res, 'b'));
       }
-      (States::S24(_res, _a, _A, _b, _S), _) => unreachable!(),
+      (States::S24(mut res, _a, A, _b, S), _) => {
+        println!("S24");
+        let A = Rc::try_unwrap(A).unwrap();
+        let S = Rc::try_unwrap(S).unwrap();
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::AB, A, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
+      }
 
       (States::S31(res, b), 'a') => {
         println!("S31 'a'");
@@ -307,7 +297,19 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         states.push(States::S34(res, b, B, a, sub_res.clone()));
         states.push(States::S31(sub_res, 'b'));
       }
-      (States::S34(_res, _b, _B, _a, _S), _) => unreachable!(),
+      (States::S34(mut res, _b, B, _a, S), _) => {
+        println!("S34");
+        let B = Rc::try_unwrap(B).unwrap();
+        let S = Rc::try_unwrap(S).unwrap();
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::BA, B, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
+      }
 
       (States::A21(res, a), 'a') => {
         println!("A21 'a'");
@@ -340,13 +342,32 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         states.push(States::A24(res, a, A, b, sub_res.clone()));
         states.push(States::A21(sub_res, 'a'));
       }
-      (States::A23(res, a, A, b), 'b') => {
+      (States::A23(mut res, _a, A, _b), 'b') => {
         println!("A23 'b'");
-        let sub_res = Rc::new(None);
-        states.push(States::A24(res, a, A, b, sub_res.clone()));
-        states.push(States::B21(sub_res, 'b'));
+        let A = Rc::try_unwrap(A).unwrap();
+        let S = None;
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::AB, A, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
       }
-      (States::A24(_res, _a, _A, _b, _S), _) => unreachable!(),
+      (States::A24(mut res, _a, A, _b, S), _) => {
+        println!("A24");
+        let A = Rc::try_unwrap(A).unwrap();
+        let S = Rc::try_unwrap(S).unwrap();
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::AB, A, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
+      }
 
       (States::B21(res, b), 'a') => {
         println!("B21 'a'");
@@ -373,11 +394,18 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         }
         // unwind.
       }
-      (States::B23(res, b, B, a), 'a') => {
+      (States::B23(mut res, _b, B, _a), 'a') => {
         println!("B23 'a'");
-        let sub_res = Rc::new(None);
-        states.push(States::B24(res, b, B, a, sub_res.clone()));
-        states.push(States::A21(sub_res, 'a'));
+        let B = Rc::try_unwrap(B).unwrap();
+        let S = None;
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::BA, B, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
       }
       (States::B23(res, b, B, a), 'b') => {
         println!("B23 'b'");
@@ -385,10 +413,25 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         states.push(States::B24(res, b, B, a, sub_res.clone()));
         states.push(States::B21(sub_res, 'b'));
       }
-      (States::B24(_res, _b, _B, _a, _S), _) => unreachable!(),
+      (States::B24(mut res, _b, B, _a, S), _) => {
+        println!("B24");
+        let B = Rc::try_unwrap(B).unwrap();
+        let S = Rc::try_unwrap(S).unwrap();
+        unsafe {
+          *Rc::get_mut_unchecked(&mut res) = Some({
+            // closure from grammar
+            compose(Direction::BA, B, S)
+          });
+        }
+        // unwind, re-match against peek_char.
+        continue;
+      }
 
       _ => panic!("Unexpected token '{}'", peek_char),
     }
+
+    // If no continue was called, then consume this character.
+    i.next();
   }
 }
 
@@ -405,7 +448,7 @@ fn main() {
 
   println!("{}", p);
 
-  println!("{:?}", parse_tree("abba".chars()));
+  println!("{:?}", parse_tree("abbbaaba".chars()));
 
   aug_bnf_impl::aug_bnf! {
     <S> => <A> <alias: B> $;

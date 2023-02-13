@@ -98,6 +98,9 @@ impl Type {
         SymbolT::Op(Operator::Arrow) => {
           break;
         }
+        SymbolT::Op(Operator::Semicolon) => {
+          break;
+        }
         _ => {
           let sym = iter.next().unwrap();
           tokens.extend(sym.tokens);
@@ -480,31 +483,93 @@ impl Display for Production {
   }
 }
 
+enum ParsedLine {
+  Production(Production),
+  TerminalType(Type),
+}
+
+fn parse_line<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<ParsedLine> {
+  let sym = peek_symbol_or(iter, "Expected line.", Span::call_site())?;
+  let sym_span = sym.span.clone();
+
+  match &sym.sym {
+    SymbolT::Ident(ident) => {
+      if ident != "terminal" {
+        return ParseError::new(
+          "Expected either production rule or \"terminal\" symbol.",
+          sym_span,
+        )
+        .into();
+      }
+      // Consume the "terminal" ident.
+      iter.next();
+
+      let x = expect_symbol!(
+        iter,
+        SymbolT::Op(Operator::Colon),
+        "Expected \":\" to follow \"terminal\" symbol.",
+        sym_span
+      );
+
+      let type_spec = Type::parse(iter)?;
+
+      expect_symbol!(
+        iter,
+        SymbolT::Op(Operator::Semicolon),
+        "Expected \";\" to follow terminal type.",
+        type_spec.span
+      );
+
+      Ok(ParsedLine::TerminalType(type_spec))
+    }
+    _ => Ok(ParsedLine::Production(Production::parse(iter)?)),
+  }
+}
+
 #[derive(Debug)]
 pub struct Grammar {
   productions: HashMap<String, Rc<Production>>,
   start_rule: String,
+  terminal_type: Type,
 }
 
 impl Grammar {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
     let mut productions: HashMap<String, Rc<Production>> = HashMap::new();
+    let mut terminal_type = None;
 
     let mut token_iter = token_stream.into_iter().peekable();
     while let Some(_) = token_iter.peek() {
-      match Production::parse(&mut token_iter) {
-        Ok(production) => {
+      match parse_line(&mut token_iter) {
+        Ok(ParsedLine::Production(production)) => {
           productions.insert(production.name.name.to_string(), Rc::new(production));
         }
+        Ok(ParsedLine::TerminalType(type_spec)) => match terminal_type {
+          Some(_) => {
+            abort!(type_spec.span, "Cannot have more than one terminal type.");
+          }
+          None => {
+            terminal_type = Some(type_spec);
+          }
+        },
         Err(err) => {
           err.raise();
         }
       }
     }
 
+    if terminal_type.is_none() {
+      abort!(
+        Span::call_site(),
+        "Must define the terminal type with a line \"terminal: <type>\""
+      );
+    }
+    let terminal_type = terminal_type.unwrap();
+
     let mut grammar = Self {
       productions,
       start_rule: "".to_string(),
+      terminal_type,
     };
 
     grammar.resolve_refs();
@@ -602,6 +667,7 @@ impl Grammar {
 
 impl Display for Grammar {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "terminal: {}\n", self.terminal_type)?;
     for (i, (_rule_name, rule)) in self.productions.iter().enumerate() {
       write!(f, "{}", rule)?;
       if i != self.productions.len() - 1 {

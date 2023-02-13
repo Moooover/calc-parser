@@ -1,5 +1,5 @@
 use proc_macro::TokenTree::{Group, Ident, Literal, Punct};
-use proc_macro::{Delimiter, Span, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Span, TokenStream};
 use proc_macro_error::abort;
 use std::fmt::{Display, Formatter};
 
@@ -19,6 +19,8 @@ pub enum Operator {
   EndProd,
   // ::
   Scope,
+  // Anything else
+  Unknown,
 }
 
 impl Operator {
@@ -31,6 +33,7 @@ impl Operator {
       Operator::BeginProd => "<",
       Operator::EndProd => ">",
       Operator::Scope => "::",
+      Operator::Unknown => "?",
     }
   }
 }
@@ -39,9 +42,13 @@ impl Operator {
   pub fn should_separate(prev_chars: &str, next_char: char) -> bool {
     let mut chars = prev_chars.chars();
     match chars.next() {
-      Some(':') => chars.next().is_some() || next_char != ':',
       Some('=') => chars.next().is_some() || next_char != '>',
-      Some(_) => true,
+      Some(';') => true,
+      Some('$') => true,
+      Some('<') => true,
+      Some('>') => true,
+      Some(':') => chars.next().is_some() || next_char != ':',
+      Some(_) => false,
       None => true,
     }
   }
@@ -118,7 +125,7 @@ impl Symbol {
       "<" => Symbol::new(SymbolT::Op(Operator::BeginProd), span, tokens),
       ">" => Symbol::new(SymbolT::Op(Operator::EndProd), span, tokens),
       "::" => Symbol::new(SymbolT::Op(Operator::Scope), span, tokens),
-      _ => abort!(span, format!("Unrecognized operator: {}", input)),
+      _ => Symbol::new(SymbolT::Op(Operator::Unknown), span, tokens),
     }
   }
 

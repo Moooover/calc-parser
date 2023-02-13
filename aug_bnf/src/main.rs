@@ -3,7 +3,6 @@
 mod aug_bnf_dyn;
 
 use aug_bnf_dyn::{GrammarParser, Production};
-use std::iter::Peekable;
 use std::rc::Rc;
 
 pub fn fmt2<T: std::fmt::Display>(v: &Vec<T>) {
@@ -472,6 +471,8 @@ fn main() {
   );
 
   aug_bnf_impl::aug_bnf! {
+    terminal: char;
+
     <S>: std::Vec<u64> => <A> <alias: B> $;
     <A>: i32 => 'a' <B>;
     <B> => 'b';

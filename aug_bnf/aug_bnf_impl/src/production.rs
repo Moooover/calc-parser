@@ -34,11 +34,28 @@ impl<T> From<ParseError> for ParseResult<T> {
 
 type ParseResult<T> = Result<T, ParseError>;
 
+macro_rules! span_join {
+  ($s1:expr) => {
+    $s1
+  };
+  ($s1:expr $(,$s2:expr)+) => {
+    $s1.join(span_join!($($s2),+)).unwrap()
+  };
+}
+
+macro_rules! span_join_opt {
+  ($s1:expr, $s2:expr) => {
+    match $s1 {
+      Some(__span) => __span.join($s2),
+      None => Some($s2),
+    }
+  };
+}
+
 fn iter_span<I: Iterator<Item = Span>>(iter: I) -> Span {
   iter
-    .fold(None, |agg_span: Option<Span>, span| match agg_span {
-      Some(agg_span) => agg_span.join(span),
-      None => Some(span),
+    .fold(None, |agg_span: Option<Span>, span| {
+      span_join_opt!(agg_span, span)
     })
     .unwrap()
 }
@@ -104,10 +121,7 @@ impl Type {
         _ => {
           let sym = iter.next().unwrap();
           tokens.extend(sym.tokens);
-          span = match span {
-            Some(span) => span.join(sym.span),
-            None => Some(sym.span),
-          };
+          span = span_join_opt!(span, sym.span);
         }
       };
     }
@@ -125,13 +139,14 @@ impl Display for Type {
 
 #[derive(Clone, Debug)]
 struct TerminalSym {
-  pub name: String,
+  pub tokens: TokenStream,
   pub span: Span,
 }
 
 // <TerminalSym> => <Ident>
 #[derive(Clone, Debug)]
 enum Terminal {
+  // '$'
   EndOfStream(Span),
   Sym(TerminalSym),
 }
@@ -144,21 +159,59 @@ impl Terminal {
     }
   }
 
-  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
-    let sym = next_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
+    let mut tokens = TokenStream::new();
+    let mut span: Option<Span> = None;
 
-    match sym.sym {
-      SymbolT::Ident(ident) => Ok(Terminal::Sym(TerminalSym {
-        name: ident,
-        span: sym.span,
-      })),
-      SymbolT::Literal(literal) => Ok(Terminal::Sym(TerminalSym {
-        name: literal,
-        span: sym.span,
-      })),
-      SymbolT::Op(Operator::DollarSign) => Ok(Terminal::EndOfStream(sym.span)),
-      _ => ParseError::new("Expected terminal symbol.", sym.span).into(),
+    loop {
+      let sym = peek_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
+      // Consume anything except for =>, <, or $ following some tokens.
+      match &sym.sym {
+        SymbolT::Ident(_) => {
+          tokens.extend(sym.tokens.clone());
+          span = span_join_opt!(span, sym.span);
+
+          // Consume the symbol.
+          iter.next();
+        }
+        SymbolT::Literal(_) => {
+          tokens.extend(sym.tokens.clone());
+          span = span_join_opt!(span, sym.span);
+
+          // Consume the symbol.
+          iter.next();
+        }
+        SymbolT::Op(Operator::Scope) => {
+          tokens.extend(sym.tokens.clone());
+          span = span_join_opt!(span, sym.span);
+
+          // Consume the symbol.
+          iter.next();
+        }
+        SymbolT::Op(Operator::DollarSign) => {
+          if tokens.is_empty() {
+            let sym_span = sym.span;
+            // Consume the symbol.
+            iter.next();
+            return Ok(Terminal::EndOfStream(sym_span));
+          }
+          break;
+        }
+        _ => {
+          break;
+        }
+      };
     }
+
+    if tokens.is_empty() {
+      let sym = peek_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
+      return ParseError::new("Expected terminal symbol.", sym.span).into();
+    }
+
+    Ok(Terminal::Sym(TerminalSym {
+      tokens,
+      span: span.unwrap(),
+    }))
   }
 }
 
@@ -166,7 +219,7 @@ impl Display for Terminal {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       Terminal::EndOfStream(_span) => write!(f, "$"),
-      Terminal::Sym(sym) => write!(f, "{}", sym.name),
+      Terminal::Sym(sym) => write!(f, "{}", sym.tokens),
     }
   }
 }
@@ -202,7 +255,7 @@ impl ProductionName {
     );
 
     // Join all spans up to this point.
-    let span = begin_span.join(sym.span).unwrap().join(end_span).unwrap();
+    let span = span_join!(begin_span, sym.span, end_span);
 
     let next_sym = peek_symbol_or(iter, "Expected => or : <type> after production name.", span)?;
     let type_spec = match next_sym.sym {
@@ -284,11 +337,7 @@ impl ProductionRef {
       SymbolT::Op(Operator::EndProd) => Ok(Self {
         production: ProductionRefT::Unresolved(production_name),
         alias: None,
-        span: begin_span
-          .join(sym.span)
-          .unwrap()
-          .join(colon_or_end.span)
-          .unwrap(),
+        span: span_join!(begin_span, sym.span, colon_or_end.span),
       }),
       SymbolT::Op(Operator::Colon) => {
         // This is an aliased rule.
@@ -314,15 +363,13 @@ impl ProductionRef {
         Ok(Self {
           production: ProductionRefT::Unresolved(production_name),
           alias: Some(alias),
-          span: begin_span
-            .join(alias_span)
-            .unwrap()
-            .join(colon_or_end.span)
-            .unwrap()
-            .join(sym.span)
-            .unwrap()
-            .join(end_span)
-            .unwrap(),
+          span: span_join!(
+            begin_span,
+            alias_span,
+            colon_or_end.span,
+            sym.span,
+            end_span
+          ),
         })
       }
       _ => ParseError::new("Expected '>' or ':'.", colon_or_end.span).into(),
@@ -415,10 +462,7 @@ impl ProductionRules {
         }
         _ => {
           let prod_rule = ProductionRule::parse(iter)?;
-          span = match span {
-            Some(span) => span.join(prod_rule.span()),
-            None => Some(prod_rule.span()),
-          };
+          span = span_join_opt!(span, prod_rule.span());
           rules.push(prod_rule);
         }
       }
@@ -455,12 +499,11 @@ impl Production {
     );
 
     let production_rules = ProductionRules::parse(iter)?;
-    let span = production_name
-      .span
-      .join(arrow_span)
-      .unwrap()
-      .join(iter_span(production_rules.iter().map(|rule| rule.span)))
-      .unwrap();
+    let span = span_join!(
+      production_name.span,
+      arrow_span,
+      iter_span(production_rules.iter().map(|rule| rule.span))
+    );
 
     Ok(Self {
       name: production_name,
@@ -504,7 +547,7 @@ fn parse_line<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult
       // Consume the "terminal" ident.
       iter.next();
 
-      let x = expect_symbol!(
+      expect_symbol!(
         iter,
         SymbolT::Op(Operator::Colon),
         "Expected \":\" to follow \"terminal\" symbol.",

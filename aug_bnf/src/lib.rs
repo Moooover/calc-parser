@@ -47,6 +47,7 @@ mod tests {
   #[test]
   fn it_works() {
     aug_bnf_impl::aug_bnf! {
+      terminal: char;
       <S> => <A> <B> ;
       <A> => 'a' <B> ;
       <B> => 'b' ;

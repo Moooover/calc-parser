@@ -1,4 +1,4 @@
-use proc_macro::Span;
+use proc_macro::{Span, TokenStream};
 use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -80,6 +80,47 @@ macro_rules! expect_symbol {
 }
 
 #[derive(Clone, Debug)]
+struct Type {
+  pub tokens: TokenStream,
+  pub span: Span,
+}
+
+impl Type {
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
+    let mut tokens = TokenStream::new();
+    let mut span: Option<Span> = None;
+
+    // Consume everything that isn't an '=>' symbol.
+    loop {
+      let sym = peek_symbol_or(iter, "Expected type.", Span::call_site())?;
+
+      match sym.sym {
+        SymbolT::Op(Operator::Arrow) => {
+          break;
+        }
+        _ => {
+          let sym = iter.next().unwrap();
+          tokens.extend(sym.tokens);
+          span = match span {
+            Some(span) => span.join(sym.span),
+            None => Some(sym.span),
+          };
+        }
+      };
+    }
+
+    let span = span.unwrap();
+    Ok(Type { tokens, span })
+  }
+}
+
+impl Display for Type {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.tokens)
+  }
+}
+
+#[derive(Clone, Debug)]
 struct TerminalSym {
   pub name: String,
   pub span: Span,
@@ -130,11 +171,12 @@ impl Display for Terminal {
 #[derive(Debug)]
 struct ProductionName {
   name: String,
+  type_spec: Option<Type>,
   span: Span,
 }
 
 impl ProductionName {
-  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let begin_span = expect_symbol!(
       iter,
       SymbolT::Op(Operator::BeginProd),
@@ -156,16 +198,35 @@ impl ProductionName {
       Span::call_site()
     );
 
+    // Join all spans up to this point.
+    let span = begin_span.join(sym.span).unwrap().join(end_span).unwrap();
+
+    let next_sym = peek_symbol_or(iter, "Expected => or : <type> after production name.", span)?;
+    let type_spec = match next_sym.sym {
+      SymbolT::Op(Operator::Colon) => {
+        // Consume the colon.
+        iter.next();
+
+        Some(Type::parse(iter)?)
+      }
+      _ => None,
+    };
+
     Ok(ProductionName {
       name: prod_name,
-      span: begin_span.join(sym.span).unwrap().join(end_span).unwrap(),
+      type_spec,
+      span,
     })
   }
 }
 
 impl Display for ProductionName {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    write!(f, "<{}>", self.name)
+    write!(f, "<{}>", self.name)?;
+    if let Some(type_spec) = &self.type_spec {
+      write!(f, ": {}", type_spec)?;
+    }
+    Ok(())
   }
 }
 

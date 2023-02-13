@@ -472,8 +472,8 @@ fn main() {
   );
 
   aug_bnf_impl::aug_bnf! {
-    <S> => <A> <alias: B> $;
-    <A> => 'a' <B>;
+    <S>: std::Vec<u64> => <A> <alias: B> $;
+    <A>: i32 => 'a' <B>;
     <B> => 'b';
   };
 

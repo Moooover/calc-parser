@@ -28,12 +28,12 @@ struct ABNode {
 }
 
 fn compose(
-  dir: Direction,
+  direction: Direction,
   children: Option<Vec<ABNode>>,
   subseq: Option<Vec<ABNode>>,
 ) -> Vec<ABNode> {
   let node = ABNode {
-    direction: Direction::AB,
+    direction,
     children,
   };
 
@@ -147,6 +147,7 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
     // don't push.
     match state {
       States::S24(mut res, _a, A, _b, S) => {
+        println!("S24");
         let A = Rc::try_unwrap(A).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -159,6 +160,7 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         continue;
       }
       States::S34(mut res, _b, B, _a, S) => {
+        println!("S34");
         let B = Rc::try_unwrap(B).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -171,6 +173,7 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         continue;
       }
       States::A24(mut res, _a, A, _b, S) => {
+        println!("A24");
         let A = Rc::try_unwrap(A).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -183,6 +186,7 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         continue;
       }
       States::B24(mut res, _b, B, _a, S) => {
+        println!("B24");
         let B = Rc::try_unwrap(B).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -200,19 +204,23 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
     let peek_char = i.next().unwrap_or('$');
     match (state, peek_char) {
       (States::I0, '$') => {
+        println!("I0 '$'");
         return None;
       }
       (States::I0, 'a') => {
+        println!("I0 'a'");
         let res = Rc::new(None);
         states.push(States::I1(res.clone()));
         states.push(States::S21(res, 'a'));
       }
       (States::I0, 'b') => {
+        println!("I0 'b'");
         let res = Rc::new(None);
         states.push(States::I1(res.clone()));
         states.push(States::S31(res, 'b'));
       }
       (States::I1(res), '$') => {
+        println!("I1 '$'");
         let res = Rc::try_unwrap(res).unwrap();
         let res = {
           // closure from grammar
@@ -222,17 +230,21 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
       }
 
       (States::S21(res, a), 'a') => {
+        println!("S21 'a'");
         let sub_res = Rc::new(None);
         states.push(States::S22(res, a, sub_res.clone()));
         states.push(States::A21(sub_res, 'a'));
       }
       (States::S21(res, a), 'b') => {
+        println!("S21 'b'");
         states.push(States::S23(res, a, Rc::new(None), 'b'));
       }
       (States::S22(res, a, A), 'b') => {
+        println!("S22 'b'");
         states.push(States::S23(res, a, A, 'b'));
       }
       (States::S23(mut res, _a, A, _b), '$') => {
+        println!("S23 '$'");
         let A = Rc::try_unwrap(A).unwrap();
         let S = None;
         unsafe {
@@ -244,11 +256,13 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         // unwind.
       }
       (States::S23(res, a, A, b), 'a') => {
+        println!("S23 'a'");
         let sub_res = Rc::new(None);
         states.push(States::S24(res, a, A, b, sub_res.clone()));
         states.push(States::S21(sub_res, 'a'));
       }
       (States::S23(res, a, A, b), 'b') => {
+        println!("S23 'b'");
         let sub_res = Rc::new(None);
         states.push(States::S24(res, a, A, b, sub_res.clone()));
         states.push(States::S31(sub_res, 'b'));
@@ -256,32 +270,39 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
       (States::S24(_res, _a, _A, _b, _S), _) => unreachable!(),
 
       (States::S31(res, b), 'a') => {
+        println!("S31 'a'");
         states.push(States::S33(res, b, Rc::new(None), 'a'));
       }
       (States::S31(res, b), 'b') => {
+        println!("S31 'b'");
         let sub_res = Rc::new(None);
         states.push(States::S32(res, b, sub_res.clone()));
         states.push(States::B21(sub_res, 'b'));
       }
       (States::S32(res, b, B), 'a') => {
+        println!("S32 'a'");
         states.push(States::S33(res, b, B, 'a'));
       }
       (States::S33(mut res, _b, B, _a), '$') => {
+        println!("S33 '$'");
         let B = Rc::try_unwrap(B).unwrap();
+        let S = None;
         unsafe {
           *Rc::get_mut_unchecked(&mut res) = Some({
             // closure from grammar
-            compose(Direction::BA, B, None)
+            compose(Direction::BA, B, S)
           });
         }
         // unwind.
       }
       (States::S33(res, b, B, a), 'a') => {
+        println!("S33 'a'");
         let sub_res = Rc::new(None);
         states.push(States::S34(res, b, B, a, sub_res.clone()));
         states.push(States::S21(sub_res, 'a'));
       }
       (States::S33(res, b, B, a), 'b') => {
+        println!("S33 'b'");
         let sub_res = Rc::new(None);
         states.push(States::S34(res, b, B, a, sub_res.clone()));
         states.push(States::S31(sub_res, 'b'));
@@ -289,17 +310,21 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
       (States::S34(_res, _b, _B, _a, _S), _) => unreachable!(),
 
       (States::A21(res, a), 'a') => {
+        println!("A21 'a'");
         let sub_res = Rc::new(None);
         states.push(States::A22(res, a, sub_res.clone()));
         states.push(States::A21(sub_res, 'a'));
       }
       (States::A21(res, a), 'b') => {
+        println!("A21 'b'");
         states.push(States::A23(res, a, Rc::new(None), 'b'));
       }
       (States::A22(res, a, A), 'b') => {
+        println!("A22 'b'");
         states.push(States::A23(res, a, A, 'b'));
       }
       (States::A23(mut res, _a, A, _b), '$') => {
+        println!("A23 '$'");
         let A = Rc::try_unwrap(A).unwrap();
         unsafe {
           *Rc::get_mut_unchecked(&mut res) = Some({
@@ -310,11 +335,13 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         // unwind.
       }
       (States::A23(res, a, A, b), 'a') => {
+        println!("A23 'a'");
         let sub_res = Rc::new(None);
         states.push(States::A24(res, a, A, b, sub_res.clone()));
         states.push(States::A21(sub_res, 'a'));
       }
       (States::A23(res, a, A, b), 'b') => {
+        println!("A23 'b'");
         let sub_res = Rc::new(None);
         states.push(States::A24(res, a, A, b, sub_res.clone()));
         states.push(States::B21(sub_res, 'b'));
@@ -322,17 +349,21 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
       (States::A24(_res, _a, _A, _b, _S), _) => unreachable!(),
 
       (States::B21(res, b), 'a') => {
+        println!("B21 'a'");
         states.push(States::B23(res, b, Rc::new(None), 'a'));
       }
       (States::B21(res, b), 'b') => {
+        println!("B21 'b'");
         let sub_res = Rc::new(None);
         states.push(States::B22(res, b, sub_res.clone()));
         states.push(States::B21(sub_res, 'b'));
       }
       (States::B22(res, b, B), 'a') => {
+        println!("B22 'a'");
         states.push(States::B23(res, b, B, 'a'));
       }
       (States::B23(mut res, _b, B, _a), '$') => {
+        println!("B23 '$'");
         let B = Rc::try_unwrap(B).unwrap();
         unsafe {
           *Rc::get_mut_unchecked(&mut res) = Some({
@@ -343,11 +374,13 @@ fn parse_tree<I: Iterator<Item = char>>(mut i: I) -> Option<Vec<ABNode>> {
         // unwind.
       }
       (States::B23(res, b, B, a), 'a') => {
+        println!("B23 'a'");
         let sub_res = Rc::new(None);
         states.push(States::B24(res, b, B, a, sub_res.clone()));
         states.push(States::A21(sub_res, 'a'));
       }
       (States::B23(res, b, B, a), 'b') => {
+        println!("B23 'b'");
         let sub_res = Rc::new(None);
         states.push(States::B24(res, b, B, a, sub_res.clone()));
         states.push(States::B21(sub_res, 'b'));
@@ -372,7 +405,7 @@ fn main() {
 
   println!("{}", p);
 
-  parse_tree("abba".chars());
+  println!("{:?}", parse_tree("abba".chars()));
 
   aug_bnf_impl::aug_bnf! {
     <S> => <A> <alias: B> $;
@@ -380,7 +413,7 @@ fn main() {
     <B> => 'b';
   };
 
-  let mut buffer: String = "".to_string();
+  let mut buffer = "".to_string();
   while let Ok(_) = std::io::stdin().read_line(&mut buffer) {
     buffer.remove(buffer.len() - 1);
 

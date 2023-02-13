@@ -27,6 +27,21 @@ struct ABNode {
   children: Option<Vec<ABNode>>,
 }
 
+impl std::fmt::Display for ABNode {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    let children_str = match &self.children {
+      Some(vec) => vec
+        .iter()
+        .fold("".to_string(), |s, node| s + &format!("{}", node)),
+      None => "".to_string(),
+    };
+    match self.direction {
+      Direction::AB => write!(f, "a{}b", children_str),
+      Direction::BA => write!(f, "b{}a", children_str),
+    }
+  }
+}
+
 fn compose(
   direction: Direction,
   children: Option<Vec<ABNode>>,
@@ -246,7 +261,7 @@ fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
         states.push(States::S31(sub_res, 'b'));
       }
       (States::S24(mut res, _a, A, _b, S), _) => {
-        println!("S24");
+        println!("S24 _");
         let A = Rc::try_unwrap(A).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -298,7 +313,7 @@ fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
         states.push(States::S31(sub_res, 'b'));
       }
       (States::S34(mut res, _b, B, _a, S), _) => {
-        println!("S34");
+        println!("S34 _");
         let B = Rc::try_unwrap(B).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -356,7 +371,7 @@ fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
         continue;
       }
       (States::A24(mut res, _a, A, _b, S), _) => {
-        println!("A24");
+        println!("A24 _");
         let A = Rc::try_unwrap(A).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -414,7 +429,7 @@ fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
         states.push(States::B21(sub_res, 'b'));
       }
       (States::B24(mut res, _b, B, _a, S), _) => {
-        println!("B24");
+        println!("B24 _");
         let B = Rc::try_unwrap(B).unwrap();
         let S = Rc::try_unwrap(S).unwrap();
         unsafe {
@@ -448,7 +463,13 @@ fn main() {
 
   println!("{}", p);
 
-  println!("{:?}", parse_tree("abbbaaba".chars()));
+  println!(
+    "{}",
+    parse_tree("abbbaaba".chars())
+      .unwrap()
+      .iter()
+      .fold("".to_string(), |s, node| s + &format!("{}", node))
+  );
 
   aug_bnf_impl::aug_bnf! {
     <S> => <A> <alias: B> $;

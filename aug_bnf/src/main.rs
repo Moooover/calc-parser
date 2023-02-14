@@ -475,7 +475,9 @@ fn main() {
 
     <S>: std::Vec<u64> => <A> <alias: B> $;
     <A>: i32 => 'a' <B>;
+    <B> => !;
     <B> => 'b';
+    <B> => char::last;
   };
 
   let mut buffer = "".to_string();

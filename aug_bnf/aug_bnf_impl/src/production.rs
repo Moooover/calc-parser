@@ -96,6 +96,15 @@ macro_rules! expect_symbol {
   }};
 }
 
+macro_rules! span_or_call_site {
+  ($span:expr) => {
+    match $span {
+      Some(span) => span,
+      None => Span::call_site(),
+    }
+  };
+}
+
 #[derive(Clone, Debug)]
 struct Type {
   pub tokens: TokenStream,
@@ -148,6 +157,8 @@ struct TerminalSym {
 enum Terminal {
   // '$'
   EndOfStream(Span),
+  // '!'
+  Epsilon(Span),
   Sym(TerminalSym),
 }
 
@@ -155,6 +166,7 @@ impl Terminal {
   pub fn span(&self) -> Span {
     match self {
       Terminal::EndOfStream(span) => *span,
+      Terminal::Epsilon(span) => *span,
       Terminal::Sym(sym) => sym.span,
     }
   }
@@ -164,8 +176,11 @@ impl Terminal {
     let mut span: Option<Span> = None;
 
     loop {
-      let sym = peek_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
-      // Consume anything except for =>, <, or $ following some tokens.
+      let sym = peek_symbol_or(
+        iter,
+        "Unexpected end of stream while parsing terminal symbol.",
+        span_or_call_site!(span),
+      )?;
       match &sym.sym {
         SymbolT::Ident(_) => {
           tokens.extend(sym.tokens.clone());
@@ -189,11 +204,24 @@ impl Terminal {
           iter.next();
         }
         SymbolT::Op(Operator::DollarSign) => {
+          // If we've already consumed some tokens, don't include this '$' in
+          // the terminal.
           if tokens.is_empty() {
             let sym_span = sym.span;
             // Consume the symbol.
             iter.next();
             return Ok(Terminal::EndOfStream(sym_span));
+          }
+          break;
+        }
+        SymbolT::Op(Operator::Bang) => {
+          // If we've already consumed some tokens, don't include this '!' in
+          // the terminal.
+          if tokens.is_empty() {
+            let sym_span = sym.span;
+            // Consume the symbol.
+            iter.next();
+            return Ok(Terminal::Epsilon(sym_span));
           }
           break;
         }
@@ -204,8 +232,8 @@ impl Terminal {
     }
 
     if tokens.is_empty() {
-      let sym = peek_symbol_or(iter, "Expected terminal symbol.", Span::call_site())?;
-      return ParseError::new("Expected terminal symbol.", sym.span).into();
+      let sym = peek_symbol_or(iter, "Expected terminal symbol.", span_or_call_site!(span))?;
+      return ParseError::new("Unexpected token.", sym.span).into();
     }
 
     Ok(Terminal::Sym(TerminalSym {
@@ -219,6 +247,7 @@ impl Display for Terminal {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       Terminal::EndOfStream(_span) => write!(f, "$"),
+      Terminal::Epsilon(_span) => write!(f, "!"),
       Terminal::Sym(sym) => write!(f, "{}", sym.tokens),
     }
   }
@@ -488,6 +517,11 @@ struct Production {
 }
 
 impl Production {
+  pub fn merge(&mut self, other: Production) {
+    debug_assert!(self.name.name == other.name.name);
+    self.rules.extend(other.rules);
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let production_name = ProductionName::parse(iter)?;
 
@@ -585,7 +619,14 @@ impl Grammar {
     while let Some(_) = token_iter.peek() {
       match parse_line(&mut token_iter) {
         Ok(ParsedLine::Production(production)) => {
-          productions.insert(production.name.name.to_string(), Rc::new(production));
+          match productions.get_mut(&production.name.name) {
+            Some(prod) => {
+              Rc::get_mut(prod).unwrap().merge(production);
+            }
+            None => {
+              productions.insert(production.name.name.to_string(), Rc::new(production));
+            }
+          }
         }
         Ok(ParsedLine::TerminalType(type_spec)) => match terminal_type {
           Some(_) => {

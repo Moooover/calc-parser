@@ -19,6 +19,8 @@ pub enum Operator {
   EndProd,
   // ::
   Scope,
+  // !
+  Bang,
   // Anything else
   Unknown,
 }
@@ -33,6 +35,7 @@ impl Operator {
       Operator::BeginProd => "<",
       Operator::EndProd => ">",
       Operator::Scope => "::",
+      Operator::Bang => "!",
       Operator::Unknown => "?",
     }
   }
@@ -48,6 +51,7 @@ impl Operator {
       Some('<') => true,
       Some('>') => true,
       Some(':') => chars.next().is_some() || next_char != ':',
+      Some('!') => true,
       Some(_) => false,
       None => true,
     }
@@ -125,6 +129,7 @@ impl Symbol {
       "<" => Symbol::new(SymbolT::Op(Operator::BeginProd), span, tokens),
       ">" => Symbol::new(SymbolT::Op(Operator::EndProd), span, tokens),
       "::" => Symbol::new(SymbolT::Op(Operator::Scope), span, tokens),
+      "!" => Symbol::new(SymbolT::Op(Operator::Bang), span, tokens),
       _ => Symbol::new(SymbolT::Op(Operator::Unknown), span, tokens),
     }
   }

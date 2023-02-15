@@ -82,7 +82,7 @@ enum States {
   // I -> Sㅓ
   I0,
   I1(Rc<Option<Vec<ABNode>>>),
-  // I2(Rc<Option<Vec<ABNode>>>),
+  // I2,
 
   // S1 -> e
   // S10,
@@ -470,16 +470,6 @@ fn main() {
       .fold("".to_string(), |s, node| s + &format!("{}", node))
   );
 
-  aug_bnf_impl::aug_bnf! {
-    terminal: char;
-
-    <S>: std::Vec<u64> => <A> <alias: B> $;
-    <A>: i32 => 'a' <B>;
-    <B> => !;
-    <B> => 'b';
-    <B> => char::last;
-  };
-
   let mut buffer = "".to_string();
   while let Ok(_) = std::io::stdin().read_line(&mut buffer) {
     buffer.remove(buffer.len() - 1);
@@ -496,4 +486,14 @@ fn main() {
     }
     buffer.clear();
   }
+
+  // aug_bnf_impl::aug_bnf! {
+  //   terminal: char;
+
+  //   <S>: std::Vec<u64> => <A> <alias: B> $;
+  //   <A>: i32 => 'a' <B>;
+  //   <B> => !;
+  //   <B> => 'b';
+  //   <B> => char::last;
+  // };
 }

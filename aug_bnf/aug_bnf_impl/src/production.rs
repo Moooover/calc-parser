@@ -3,12 +3,13 @@ use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::iter::Peekable;
+use std::ops::Deref;
 use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
 
 #[derive(Debug)]
-struct ParseError {
+pub struct ParseError {
   message: String,
   span: Span,
 }
@@ -32,7 +33,7 @@ impl<T> From<ParseError> for ParseResult<T> {
   }
 }
 
-type ParseResult<T> = Result<T, ParseError>;
+pub type ParseResult<T> = Result<T, ParseError>;
 
 macro_rules! span_join {
   ($s1:expr) => {
@@ -147,14 +148,14 @@ impl Display for Type {
 }
 
 #[derive(Clone, Debug)]
-struct TerminalSym {
+pub struct TerminalSym {
   pub tokens: TokenStream,
   pub span: Span,
 }
 
 // <TerminalSym> => <Ident>
 #[derive(Clone, Debug)]
-enum Terminal {
+pub enum Terminal {
   // '$'
   EndOfStream(Span),
   // '!'
@@ -254,7 +255,7 @@ impl Display for Terminal {
 }
 
 #[derive(Debug)]
-struct ProductionName {
+pub struct ProductionName {
   name: String,
   type_spec: Option<Type>,
   span: Span,
@@ -315,8 +316,8 @@ impl Display for ProductionName {
   }
 }
 
-#[derive(Debug)]
-enum ProductionRefT {
+#[derive(Clone, Debug)]
+pub enum ProductionRefT {
   Resolved(Weak<Production>),
   Unresolved(String),
 }
@@ -331,8 +332,8 @@ impl Display for ProductionRefT {
 }
 
 // <ProductionRef> => "<" ( <Alias> ":" )? <Ident> ">"
-#[derive(Debug)]
-struct ProductionRef {
+#[derive(Clone, Debug)]
+pub struct ProductionRef {
   pub production: ProductionRefT,
   pub alias: Option<String>,
   pub span: Span,
@@ -406,6 +407,15 @@ impl ProductionRef {
   }
 }
 
+impl Deref for ProductionRef {
+  type Target = Production;
+
+  fn deref(&self) -> &Self::Target {
+    let ProductionRefT::Resolved(resolved) = self.production;
+    return &resolved.upgrade().unwrap();
+  }
+}
+
 impl Display for ProductionRef {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     if let Some(alias) = &self.alias {
@@ -418,7 +428,7 @@ impl Display for ProductionRef {
 
 // <ProductionRule> => <ProductionRef> | <TerminalSym>
 #[derive(Debug)]
-enum ProductionRule {
+pub enum ProductionRule {
   Intermediate(ProductionRef),
   Terminal(Terminal),
 }
@@ -460,7 +470,7 @@ impl Display for ProductionRule {
 
 // <ProductionRules> => <ProductionRule> <ProductionRules>?
 #[derive(Debug)]
-struct ProductionRules {
+pub struct ProductionRules {
   pub rules: Vec<ProductionRule>,
   pub span: Span,
 }
@@ -510,7 +520,7 @@ impl Display for ProductionRules {
 
 // <Production> => <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
-struct Production {
+pub struct Production {
   name: ProductionName,
   rules: Vec<ProductionRules>,
   span: Span,
@@ -520,6 +530,10 @@ impl Production {
   pub fn merge(&mut self, other: Production) {
     debug_assert!(self.name.name == other.name.name);
     self.rules.extend(other.rules);
+  }
+
+  pub fn rules(&self) -> &Vec<ProductionRules> {
+    &self.rules
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {

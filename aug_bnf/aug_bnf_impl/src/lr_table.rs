@@ -8,12 +8,15 @@ use crate::production::{
 use crate::production::Grammar;
 
 /// A production state is an instance of a production and how far through the
-/// production we've parsed so far.
+/// production we've parsed so far (represented by a dot).
+///
+/// i.e. A -> b . C d
+/// indicates that b has already been parsed, and we're ready to parse C d.
 #[derive(Clone)]
 struct ProductionState<'a> {
   // The name of the production, i.e. the LHS of A -> b C d ...
   name: &'a ProductionName,
-  // The rules that make up this production state.
+  // The rules that make up this production, i.e. the RHS.
   rules: &'a ProductionRules,
   // Ranges from [0, rules.len()], and is the position of the dot.
   pos: usize,
@@ -41,12 +44,12 @@ impl<'a> ProductionState<'a> {
     debug_assert!(rules.rules.len() > 0);
     let mut terms = Vec::new();
     let mut pending_rules = VecDeque::new();
-    let mut visited_rules = HashSet::new();
+    // let mut visited_rules = HashSet::new();
 
     pending_rules.push_back(rules);
 
     while let Some(rule) = pending_rules.pop_front() {
-      match rule.rules[0] {
+      match &rule.rules[0] {
         ProductionRule::Intermediate(production_ref) => {
           let production: &Production = &production_ref;
         }
@@ -56,7 +59,7 @@ impl<'a> ProductionState<'a> {
             // one epsilon.
             debug_assert!(rules.rules.len() == 1);
           }
-          terms.push(terminal);
+          terms.push(terminal.clone());
         }
       }
     }
@@ -68,11 +71,11 @@ impl<'a> ProductionState<'a> {
     debug_assert!(self.pos < self.rules.rules.len());
     let mut result = Vec::new();
 
-    match self.rules.rules[self.pos] {
+    match &self.rules.rules[self.pos] {
       ProductionRule::Intermediate(production_ref) => {}
       ProductionRule::Terminal(terminal) => {
         result.push((
-          terminal,
+          terminal.clone(),
           Self {
             pos: self.pos + 1,
             ..self.clone()
@@ -80,11 +83,18 @@ impl<'a> ProductionState<'a> {
         ));
       }
     };
+
+    return result;
   }
 }
 
+/// A state in the parsing DFA, which contains the set of all possible
+/// productions that we could currently be parsing. Note that these rules must
+/// be compatible with each other, meaning they have all the same tokens before
+/// the '.'.
 struct Closure<'a> {
   states: Vec<ProductionState<'a>>,
+  uid: u32,
 }
 
 impl<'a> Closure<'a> {
@@ -100,7 +110,10 @@ impl<'a> Closure<'a> {
       closure.push(state);
     }
 
-    return Self { states: closure };
+    return Self {
+      states: closure,
+      uid: 0,
+    };
   }
 }
 

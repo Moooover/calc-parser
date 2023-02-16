@@ -411,8 +411,15 @@ impl Deref for ProductionRef {
   type Target = Production;
 
   fn deref(&self) -> &Self::Target {
-    let ProductionRefT::Resolved(resolved) = self.production;
-    return &resolved.upgrade().unwrap();
+    match &self.production {
+      ProductionRefT::Resolved(resolved) => unimplemented!(), /*resolved.upgrade().unwrap()*/
+      ProductionRefT::Unresolved(unresolved) => {
+        panic!(
+          "Attempt to resolve unresolved production ref {}",
+          unresolved
+        );
+      }
+    }
   }
 }
 

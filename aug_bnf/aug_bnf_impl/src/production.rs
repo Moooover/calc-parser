@@ -306,6 +306,20 @@ impl ProductionName {
   }
 }
 
+impl std::hash::Hash for ProductionName {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.name.hash(state);
+  }
+}
+
+impl PartialEq for ProductionName {
+  fn eq(&self, other: &ProductionName) -> bool {
+    return self.name == other.name;
+  }
+}
+
+impl Eq for ProductionName {}
+
 impl Display for ProductionName {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(f, "<{}>", self.name)?;
@@ -528,9 +542,9 @@ impl Display for ProductionRules {
 // <Production> => <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
 pub struct Production {
-  name: ProductionName,
-  rules: Vec<ProductionRules>,
-  span: Span,
+  pub name: ProductionName,
+  pub rules: Vec<ProductionRules>,
+  pub span: Span,
 }
 
 impl Production {

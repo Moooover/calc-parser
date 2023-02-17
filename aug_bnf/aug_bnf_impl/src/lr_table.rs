@@ -2,10 +2,25 @@ use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::production::{
-  Production, ProductionName, ProductionRef, ProductionRule, ProductionRules, Terminal, TerminalSym,
+  Production, ProductionName, ProductionRef, ProductionRefT, ProductionRule, ProductionRules,
+  Terminal, TerminalSym,
 };
 
 use crate::production::Grammar;
+
+enum Action {
+  Shift(Terminal),
+  Reduce(ProductionRef),
+}
+
+struct Transition<'a> {
+  action: Action,
+  next_state: ProductionState<'a>,
+}
+
+struct TransitionSet {
+  todo!();
+}
 
 /// A production state is an instance of a production and how far through the
 /// production we've parsed so far (represented by a dot).
@@ -38,53 +53,80 @@ impl<'a> ProductionState<'a> {
     }
   }
 
-  // Given the list of production rules, returns the list of possible first
-  // terminals that this production could match.
-  fn production_first(rules: &ProductionRules) -> Vec<Terminal> {
-    debug_assert!(rules.rules.len() > 0);
+  fn from_production(production: &'a Production, possible_lookaheads: Vec<Terminal>) -> Vec<Self> {
+    production
+      .rules
+      .iter()
+      .map(|rules| Self {
+        name: &production.name,
+        rules: &rules,
+        pos: 0,
+        possible_lookaheads: possible_lookaheads.clone(),
+      })
+      .collect()
+  }
+
+  pub fn is_complete(&self) -> bool {
+    self.pos == self.rules.rules.len()
+  }
+
+  // Returns the next symbol in this production, if there are any symbols left.
+  pub fn next_sym(&self) -> Option<&'a ProductionRule> {
+    if self.is_complete() {
+      return None;
+    }
+
+    return Some(&self.rules.rules[self.pos]);
+  }
+
+  pub fn advance(&self) -> ProductionState<'a> {
+    debug_assert!(self.pos < self.rules.rules.len());
+    Self {
+      pos: self.pos + 1,
+      ..self.clone()
+    }
+  }
+}
+
+struct LRState<'a> {
+  states: Vec<ProductionState<'a>>,
+}
+
+impl<'a> LRState<'a> {
+  // Returns the list of possible first terminals that this production could
+  // match after position `pos`.
+  pub fn calculate_transitions(&self, pos: u32) -> Vec<(Terminal, ProductionState<'a>)> {
+    debug_assert!(self.rules.rules.len() > pos as usize);
     let mut terms = Vec::new();
     let mut pending_rules = VecDeque::new();
-    // let mut visited_rules = HashSet::new();
+    let mut visited_rules = HashSet::new();
 
-    pending_rules.push_back(rules);
+    pending_rules.push_back(self.clone());
+    visited_rules.insert(self.name);
 
     while let Some(rule) = pending_rules.pop_front() {
-      match &rule.rules[0] {
-        ProductionRule::Intermediate(production_ref) => {
+      match rule.next_sym() {
+        Some(ProductionRule::Intermediate(production_ref)) => {
           let production: &Production = &production_ref;
+          // let next_production = production.advance();
+          pending_rules.extend(Self::from_production(
+            production,
+            vec![],
+            // next_production.first_after(0).map(|(term, _state)| term),
+          ));
         }
-        ProductionRule::Terminal(terminal) => {
+        Some(ProductionRule::Terminal(terminal)) => {
           if let Terminal::Epsilon(_) = terminal {
-            // Disallow productions containing epsilon that don't contain only
-            // one epsilon.
-            debug_assert!(rules.rules.len() == 1);
+            pending_rules.push_back(rule.advance());
+          } else {
+            terms.push((terminal.clone(), rule));
           }
-          terms.push(terminal.clone());
         }
+        None => panic!("Unexpected finished production"),
       }
     }
 
     return terms;
-  }
-
-  pub fn advance(&self) -> Vec<(Terminal, ProductionState<'a>)> {
-    debug_assert!(self.pos < self.rules.rules.len());
-    let mut result = Vec::new();
-
-    match &self.rules.rules[self.pos] {
-      ProductionRule::Intermediate(production_ref) => {}
-      ProductionRule::Terminal(terminal) => {
-        result.push((
-          terminal.clone(),
-          Self {
-            pos: self.pos + 1,
-            ..self.clone()
-          },
-        ));
-      }
-    };
-
-    return result;
   }
 }
 
@@ -94,32 +136,34 @@ impl<'a> ProductionState<'a> {
 /// the '.'.
 struct Closure<'a> {
   states: Vec<ProductionState<'a>>,
-  uid: u32,
 }
 
-impl<'a> Closure<'a> {
+impl<'a> From<LRState<'a>> for Closure<'a> {
   // List all derivative states from this one via application of production
   // rules to nonterminal symbols immediately following "pos".
-  pub fn closure_from(&self) -> Self {
+  fn from(lr_state: LRState<'a>) -> Self {
     let mut queue: VecDeque<ProductionState<'a>> = VecDeque::new();
     let mut closure = Vec::new();
 
-    queue.extend(self.states.clone());
+    queue.extend(lr_state.states);
 
     while let Some(state) = queue.pop_front() {
+      if !state.is_complete() {
+        match state.next_sym() {
+          Some(ProductionRule::Intermediate(production)) => match &production.production {
+            ProductionRefT::Resolved(prod_ptr) => {
+              let prod = prod_ptr.upgrade().unwrap();
+            }
+            _ => panic!("Unexpected unresolved intermediate"),
+          },
+          _ => {}
+        }
+      }
       closure.push(state);
     }
 
-    return Self {
-      states: closure,
-      uid: 0,
-    };
+    return Self { states: closure };
   }
-}
-
-enum Action {
-  Shift(Terminal),
-  Reduce(ProductionRef),
 }
 
 // LR table keys are pairs of (state_id, lookahead), which are used to look up

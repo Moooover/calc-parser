@@ -307,7 +307,7 @@ impl Display for Terminal {
   }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ProductionName {
   name: String,
   type_spec: Option<Type>,

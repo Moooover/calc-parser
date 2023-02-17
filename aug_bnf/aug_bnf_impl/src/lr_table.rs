@@ -1,3 +1,4 @@
+use proc_macro::Span;
 use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -21,6 +22,16 @@ struct Transition<'a> {
 
 // TODO
 struct TransitionSet {}
+
+enum FirstCacheState {
+  Hit(HashSet<Terminal>),
+  // The terminals for this state are currently being calculated.
+  Pending,
+}
+
+/// A cache of the sets of possible first elements seen in a production rule,
+/// given the production's name.
+type ProductionFirstTable = HashMap<ProductionName, FirstCacheState>;
 
 /// A production state is an instance of a production and how far through the
 /// production we've parsed so far (represented by a dot).
@@ -87,34 +98,67 @@ impl<'a> ProductionState<'a> {
     }
   }
 
-  pub fn calculate_first_set(&self, first_tbl: &mut ProductionFirstTable<'a>) -> HashSet<Terminal> {
+  pub fn calculate_first_set(&self, first_cache: &mut ProductionFirstTable) -> HashSet<Terminal> {
+    if self.pos == 0 {
+      if let Some(state) = first_cache.get(&self.name) {
+        match &state {
+          FirstCacheState::Hit(terms) => {
+            return terms.clone();
+          }
+          FirstCacheState::Pending => {
+            // If this production is in a pending state, that means some
+            // recursive parent caller is calculating this state, so ignore more
+            // instances of the same state.
+            return HashSet::new();
+          }
+        };
+      } else {
+        // Set the cache state to pending.
+        first_cache.insert(self.name.clone(), FirstCacheState::Pending);
+      }
+    }
+
     debug_assert!(self.rules.rules.len() > self.pos as usize);
     let mut terms = HashSet::new();
-    let mut pending_rules = VecDeque::new();
-    let mut visited_rules = HashSet::new();
 
-    pending_rules.push_back(self.clone());
-    visited_rules.insert(self.name);
-
-    // TODO cont from here
     match self.next_sym() {
       Some(ProductionRule::Intermediate(production_ref)) => {
         let production: &Production = &production_ref;
-        // let next_production = production.advance();
-        pending_rules.extend(Self::from_production(
-          production,
-          vec![],
-          // next_production.first_after(0).map(|(term, _state)| term),
-        ));
+        // calculate_first_set doesn't ever use possible_lookaheads, so we can
+        // set it to the empty set.
+        let prod_state = Self::from_production(production, vec![]);
+        terms.extend(
+          prod_state
+            .into_iter()
+            .fold(HashSet::new(), |mut terms, state| {
+              terms.extend(state.calculate_first_set(first_cache));
+              terms
+            }),
+        );
       }
       Some(ProductionRule::Terminal(terminal)) => {
         if let Terminal::Epsilon(_) = terminal {
-          pending_rules.push_back(rule.advance());
+          terms.extend(self.advance().calculate_first_set(first_cache));
         } else {
           terms.insert(terminal.clone());
         }
       }
-      None => panic!("Unexpected finished production"),
+      // If the production is finished, return epsilon.
+      None => {
+        terms.insert(Terminal::Epsilon(Span::call_site()));
+      }
+    }
+
+    if self.pos == 0 {
+      // Insert into the cache if it doesn't already exist.
+      if let Some(state) = first_cache.get(&self.name) {
+        match &state {
+          FirstCacheState::Pending => {
+            first_cache.insert(self.name.clone(), FirstCacheState::Hit(terms.clone()));
+          }
+          _ => {}
+        }
+      }
     }
 
     return terms;
@@ -138,72 +182,6 @@ impl<'a> PartialEq for ProductionState<'a> {
 }
 
 impl<'a> Eq for ProductionState<'a> {}
-
-struct ProductionFirstTable<'a> {
-  cache: HashMap<ProductionState<'a>, HashSet<Terminal>>,
-}
-
-impl<'a> ProductionFirstTable<'a> {
-  pub fn new() -> Self {
-    Self {
-      cache: HashMap::new(),
-    }
-  }
-
-  pub fn first(&mut self, state: &ProductionState<'a>) -> &'a HashSet<Terminal> {
-    match self.cache.get(state) {
-      Some(terms) => terms,
-      None => {
-        unimplemented!();
-      }
-    }
-  }
-}
-
-struct LRState<'a> {
-  states: Vec<ProductionState<'a>>,
-}
-
-impl<'a> LRState<'a> {
-  // Returns the list of possible first terminals that this production could
-  // match after position `pos`.
-  pub fn calculate_transitions(&self, pos: u32) -> Vec<(Terminal, ProductionState<'a>)> {
-    unimplemented!();
-    /*
-    debug_assert!(self.rules.rules.len() > pos as usize);
-    let mut terms = Vec::new();
-    let mut pending_rules = VecDeque::new();
-    let mut visited_rules = HashSet::new();
-
-    pending_rules.push_back(self.clone());
-    visited_rules.insert(self.name);
-
-    while let Some(rule) = pending_rules.pop_front() {
-      match rule.next_sym() {
-        Some(ProductionRule::Intermediate(production_ref)) => {
-          let production: &Production = &production_ref;
-          // let next_production = production.advance();
-          pending_rules.extend(Self::from_production(
-            production,
-            vec![],
-            // next_production.first_after(0).map(|(term, _state)| term),
-          ));
-        }
-        Some(ProductionRule::Terminal(terminal)) => {
-          if let Terminal::Epsilon(_) = terminal {
-            pending_rules.push_back(rule.advance());
-          } else {
-            terms.push((terminal.clone(), rule));
-          }
-        }
-        None => panic!("Unexpected finished production"),
-      }
-    }
-
-    return terms;
-    */
-  }
-}
 
 /// A state in the parsing DFA, which contains the set of all possible
 /// productions that we could currently be parsing. Note that these rules must
@@ -238,6 +216,18 @@ impl<'a> From<LRState<'a>> for Closure<'a> {
     }
 
     return Self { states: closure };
+  }
+}
+
+struct LRState<'a> {
+  states: Vec<ProductionState<'a>>,
+}
+
+impl<'a> LRState<'a> {
+  // Returns the list of possible first terminals that this production could
+  // match after position `pos`.
+  pub fn calculate_transitions(&self, pos: u32) -> Vec<(Terminal, ProductionState<'a>)> {
+    unimplemented!();
   }
 }
 

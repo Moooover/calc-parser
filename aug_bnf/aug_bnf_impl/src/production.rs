@@ -1,7 +1,8 @@
-use proc_macro::{Span, TokenStream};
+use proc_macro::{Span, TokenStream, TokenTree};
 use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::iter::Peekable;
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
@@ -244,6 +245,58 @@ impl Terminal {
   }
 }
 
+impl Hash for Terminal {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    match self {
+      Terminal::EndOfStream(_) => {
+        state.write_u64(0);
+      }
+      Terminal::Epsilon(_) => {
+        state.write_u64(1);
+      }
+      Terminal::Sym(sym) => {
+        state.write_u64(2);
+        sym.tokens.clone().into_iter().for_each(|tt| match tt {
+          TokenTree::Ident(ident) => {
+            state.write_u64(3);
+            ident.to_string().hash(state);
+          }
+          TokenTree::Punct(punct) => {
+            state.write_u64(4);
+            punct.as_char().hash(state);
+          }
+          _ => panic!("Unexpected token in terminal"),
+        });
+      }
+    };
+  }
+}
+
+impl PartialEq for Terminal {
+  fn eq(&self, other: &Self) -> bool {
+    match (self, other) {
+      (Terminal::EndOfStream(_1), Terminal::EndOfStream(_2)) => true,
+      (Terminal::Epsilon(_1), Terminal::Epsilon(_2)) => true,
+      (Terminal::Sym(sym1), Terminal::Sym(sym2)) => std::iter::zip(
+        sym1.tokens.clone().into_iter(),
+        sym2.tokens.clone().into_iter(),
+      )
+      .all(|(token1, token2)| match (token1, token2) {
+        (TokenTree::Ident(ident1), TokenTree::Ident(ident2)) => {
+          ident1.to_string() == ident2.to_string()
+        }
+        (TokenTree::Punct(punct1), TokenTree::Punct(punct2)) => {
+          punct1.as_char() == punct2.as_char()
+        }
+        _ => false,
+      }),
+      _ => false,
+    }
+  }
+}
+
+impl Eq for Terminal {}
+
 impl Display for Terminal {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
@@ -306,8 +359,8 @@ impl ProductionName {
   }
 }
 
-impl std::hash::Hash for ProductionName {
-  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for ProductionName {
+  fn hash<H: Hasher>(&self, state: &mut H) {
     self.name.hash(state);
   }
 }

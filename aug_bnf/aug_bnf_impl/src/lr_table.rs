@@ -1,5 +1,6 @@
 use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 
 use crate::production::{
   Production, ProductionName, ProductionRef, ProductionRefT, ProductionRule, ProductionRules,
@@ -18,9 +19,8 @@ struct Transition<'a> {
   next_state: ProductionState<'a>,
 }
 
-struct TransitionSet {
-  todo!();
-}
+// TODO
+struct TransitionSet {}
 
 /// A production state is an instance of a production and how far through the
 /// production we've parsed so far (represented by a dot).
@@ -86,6 +86,78 @@ impl<'a> ProductionState<'a> {
       ..self.clone()
     }
   }
+
+  pub fn calculate_first_set(&self, first_tbl: &mut ProductionFirstTable<'a>) -> HashSet<Terminal> {
+    debug_assert!(self.rules.rules.len() > self.pos as usize);
+    let mut terms = HashSet::new();
+    let mut pending_rules = VecDeque::new();
+    let mut visited_rules = HashSet::new();
+
+    pending_rules.push_back(self.clone());
+    visited_rules.insert(self.name);
+
+    // TODO cont from here
+    match self.next_sym() {
+      Some(ProductionRule::Intermediate(production_ref)) => {
+        let production: &Production = &production_ref;
+        // let next_production = production.advance();
+        pending_rules.extend(Self::from_production(
+          production,
+          vec![],
+          // next_production.first_after(0).map(|(term, _state)| term),
+        ));
+      }
+      Some(ProductionRule::Terminal(terminal)) => {
+        if let Terminal::Epsilon(_) = terminal {
+          pending_rules.push_back(rule.advance());
+        } else {
+          terms.insert(terminal.clone());
+        }
+      }
+      None => panic!("Unexpected finished production"),
+    }
+
+    return terms;
+  }
+}
+
+impl<'a> Hash for ProductionState<'a> {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.name.hash(state);
+    self.pos.hash(state);
+  }
+}
+
+impl<'a> PartialEq for ProductionState<'a> {
+  // Production states are grouped into equivalence classes based only on their
+  // name and position, not lookaheads, as those don't affect the `first` set of
+  // the state.
+  fn eq(&self, other: &Self) -> bool {
+    self.name == other.name && self.pos == other.pos
+  }
+}
+
+impl<'a> Eq for ProductionState<'a> {}
+
+struct ProductionFirstTable<'a> {
+  cache: HashMap<ProductionState<'a>, HashSet<Terminal>>,
+}
+
+impl<'a> ProductionFirstTable<'a> {
+  pub fn new() -> Self {
+    Self {
+      cache: HashMap::new(),
+    }
+  }
+
+  pub fn first(&mut self, state: &ProductionState<'a>) -> &'a HashSet<Terminal> {
+    match self.cache.get(state) {
+      Some(terms) => terms,
+      None => {
+        unimplemented!();
+      }
+    }
+  }
 }
 
 struct LRState<'a> {
@@ -96,6 +168,8 @@ impl<'a> LRState<'a> {
   // Returns the list of possible first terminals that this production could
   // match after position `pos`.
   pub fn calculate_transitions(&self, pos: u32) -> Vec<(Terminal, ProductionState<'a>)> {
+    unimplemented!();
+    /*
     debug_assert!(self.rules.rules.len() > pos as usize);
     let mut terms = Vec::new();
     let mut pending_rules = VecDeque::new();
@@ -127,6 +201,7 @@ impl<'a> LRState<'a> {
     }
 
     return terms;
+    */
   }
 }
 

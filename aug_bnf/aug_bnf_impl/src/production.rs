@@ -751,6 +751,10 @@ pub struct Grammar {
 }
 
 impl Grammar {
+  pub fn starting_rule(&self) -> Rc<Production> {
+    self.productions.get(&self.start_rule).unwrap().clone()
+  }
+
   pub fn from(token_stream: Vec<Symbol>) -> Self {
     let mut productions: HashMap<String, Rc<Production>> = HashMap::new();
     let mut parser_state = ParserState::new();

@@ -1,12 +1,12 @@
 use proc_macro::Span;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
-use std::rc::Weak;
+use std::rc::{Rc, Weak};
 
 use crate::production::{
-  Production, ProductionName, ProductionRef, ProductionRefT, ProductionRule, ProductionRules,
-  Terminal,
+  Production, ProductionName, ProductionRefT, ProductionRule, ProductionRules, Terminal,
 };
 
 use crate::production::Grammar;
@@ -348,9 +348,9 @@ struct LRState {
 }
 
 impl LRState {
-  pub fn new(states: BTreeSet<ProductionState>, transitions: TransitionSet) -> Self {
+  pub fn new<I: Iterator<Item = ProductionState>>(states: I, transitions: TransitionSet) -> Self {
     Self {
-      states,
+      states: states.collect(),
       transitions,
     }
   }
@@ -373,13 +373,15 @@ impl PartialEq for LRState {
 impl Eq for LRState {}
 
 pub struct LRTable {
-  entries: HashMap<LRState, Action>,
+  states: HashSet<Rc<LRState>>,
+  entries: HashMap<Action, Rc<LRState>>,
   first_table: ProductionFirstTable,
 }
 
 impl LRTable {
   pub fn new() -> Self {
     LRTable {
+      states: HashSet::new(),
       entries: HashMap::new(),
       first_table: HashMap::new(),
     }
@@ -389,6 +391,10 @@ impl LRTable {
     let trans_set = TransitionSet::new();
 
     let closure = Closure::from_lr_states(states, &mut self.first_table);
+    self.states.insert(Rc::new(LRState::new(
+      closure.states.into_iter(),
+      TransitionSet::new(),
+    )));
 
     trans_set
   }
@@ -398,6 +404,26 @@ impl From<Grammar> for LRTable {
   fn from(grammar: Grammar) -> Self {
     let mut table = LRTable::new();
 
+    let init_state_ptr = grammar.starting_rule();
+    let init_state = init_state_ptr.deref();
+    let x = ProductionState::new(
+      ProductionInst {
+        name: init_state.name.clone(),
+        rules: init_state.rules[0].clone(),
+      },
+      vec![Terminal::EndOfStream(Span::call_site())],
+    );
+    table.calculate_transitions(&vec![]);
+
     return table;
+  }
+}
+
+impl Display for LRTable {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for state in self.states.iter() {
+      write!(f, "{} ", state)?;
+    }
+    Ok(())
   }
 }

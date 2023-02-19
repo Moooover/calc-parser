@@ -450,6 +450,7 @@ fn parse_tree<I: Iterator<Item = char>>(i: I) -> Option<Vec<ABNode>> {
 }
 
 fn main() {
+  /*
   let mut p = GrammarParser::<char>::new('I', '$');
   p.add_production(Production::new('I', vec!['S', '$']));
   p.add_production(Production::new('S', vec![]));
@@ -486,14 +487,16 @@ fn main() {
     }
     buffer.clear();
   }
+  */
 
-  // aug_bnf_impl::aug_bnf! {
-  //   terminal: char;
+  aug_bnf_impl::aug_bnf! {
+    terminal: char;
 
-  //   <S>: std::Vec<u64> => <A> <alias: B> $;
-  //   <A>: i32 => 'a' <B>;
-  //   <B> => !;
-  //   <B> => 'b';
-  //   <B> => char::last;
-  // };
+    <S>: std::Vec<u64> => <A> <alias: B> $;
+    <A>: i32 => 'a' <B>;
+    <A>: i32 => <B>;
+    <B> => !;
+    <B> => 'b';
+    <B> => char::last;
+  };
 }

@@ -76,7 +76,8 @@ impl ProductionInst {
 
     match self.rules.rule_at(pos) {
       Some(ProductionRule::Intermediate(production_ref)) => {
-        let production: &Production = &production_ref;
+        let prod_ptr = production_ref.deref();
+        let production: &Production = prod_ptr.deref();
         // calculate_first_set doesn't ever use possible_lookaheads, so we can
         // set it to the empty set.
         let prod_insts = Self::from_production(production);
@@ -240,6 +241,21 @@ impl Ord for ProductionState {
   }
 }
 
+impl Display for ProductionState {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(
+      f,
+      "[{} {}, {}]",
+      self.inst.name,
+      self.pos,
+      &self
+        .possible_lookaheads
+        .iter()
+        .fold("".to_string(), |s, sym| s + "/" + &format!("{}", sym))[1..]
+    )
+  }
+}
+
 /// A state in the parsing DFA, which contains the set of all possible
 /// productions that we could currently be parsing. Note that these rules must
 /// be compatible with each other, meaning they have all the same tokens before
@@ -372,6 +388,18 @@ impl PartialEq for LRState {
 
 impl Eq for LRState {}
 
+impl Display for LRState {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for (i, state) in self.states.iter().enumerate() {
+      write!(f, "{}", state)?;
+      if i != 0 {
+        write!(f, ", ")?;
+      }
+    }
+    Ok(())
+  }
+}
+
 pub struct LRTable {
   states: HashSet<Rc<LRState>>,
   entries: HashMap<Action, Rc<LRState>>,
@@ -413,7 +441,7 @@ impl From<Grammar> for LRTable {
       },
       vec![Terminal::EndOfStream(Span::call_site())],
     );
-    table.calculate_transitions(&vec![]);
+    table.calculate_transitions(&vec![x]);
 
     return table;
   }

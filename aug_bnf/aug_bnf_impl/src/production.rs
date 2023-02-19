@@ -443,6 +443,18 @@ pub struct ProductionRef {
 }
 
 impl ProductionRef {
+  pub fn deref(&self) -> Rc<Production> {
+    match &self.production {
+      ProductionRefT::Resolved(resolved) => resolved.upgrade().unwrap().clone(),
+      ProductionRefT::Unresolved(unresolved) => {
+        panic!(
+          "Attempt to resolve unresolved production ref {}",
+          unresolved
+        );
+      }
+    }
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
     let begin_span = expect_symbol!(
       iter,
@@ -506,22 +518,6 @@ impl ProductionRef {
         })
       }
       _ => ParseError::new("Expected '>' or ':'.", colon_or_end.span).into(),
-    }
-  }
-}
-
-impl Deref for ProductionRef {
-  type Target = Production;
-
-  fn deref(&self) -> &Self::Target {
-    match &self.production {
-      ProductionRefT::Resolved(resolved) => unimplemented!(), /*resolved.upgrade().unwrap()*/
-      ProductionRefT::Unresolved(unresolved) => {
-        panic!(
-          "Attempt to resolve unresolved production ref {}",
-          unresolved
-        );
-      }
     }
   }
 }

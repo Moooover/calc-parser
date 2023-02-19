@@ -20,14 +20,13 @@ pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let grammar = Grammar::from(list);
   let s = format!("{}", grammar);
   let lr_table = LRTable::from(grammar);
-  let syn_tree = code_gen::to_match_loop(&lr_table);
+  // let syn_tree = code_gen::to_match_loop(&lr_table);
+  // return syn_tree.into();
 
-  // return TokenStream::from(quote! {
-  //   let var = #s;
-  //   println!("{}", var);
-  // });
-
-  return syn_tree.into();
+  return TokenStream::from(quote! {
+    let var = #s;
+    println!("{}", var);
+  });
 
   // let token_stream = list.iter().map(|sym| {
   //   let s = format!("{}", sym);

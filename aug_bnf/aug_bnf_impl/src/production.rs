@@ -107,6 +107,24 @@ macro_rules! span_or_call_site {
   };
 }
 
+pub struct ParserState {
+  next_production_uid: u32,
+}
+
+impl ParserState {
+  pub fn new() -> Self {
+    Self {
+      next_production_uid: 0,
+    }
+  }
+
+  pub fn next_prod_uid(&mut self) -> u32 {
+    let uid = self.next_production_uid;
+    self.next_production_uid += 1;
+    return uid;
+  }
+}
+
 #[derive(Clone, Debug)]
 struct Type {
   pub tokens: TokenStream,
@@ -310,12 +328,17 @@ impl Display for Terminal {
 #[derive(Clone, Debug)]
 pub struct ProductionName {
   name: String,
+  // A unique ID for this production, determined by declaration order.
+  uid: u32,
   type_spec: Option<Type>,
   span: Span,
 }
 
 impl ProductionName {
-  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
+  pub fn parse<T: Iterator<Item = Symbol>>(
+    iter: &mut Peekable<T>,
+    state: &mut ParserState,
+  ) -> ParseResult<Self> {
     let begin_span = expect_symbol!(
       iter,
       SymbolT::Op(Operator::BeginProd),
@@ -354,6 +377,7 @@ impl ProductionName {
     Ok(ProductionName {
       name: prod_name,
       type_spec,
+      uid: state.next_prod_uid(),
       span,
     })
   }
@@ -361,17 +385,29 @@ impl ProductionName {
 
 impl Hash for ProductionName {
   fn hash<H: Hasher>(&self, state: &mut H) {
-    self.name.hash(state);
+    self.uid.hash(state);
   }
 }
 
 impl PartialEq for ProductionName {
   fn eq(&self, other: &ProductionName) -> bool {
-    return self.name == other.name;
+    return self.uid == other.uid;
   }
 }
 
 impl Eq for ProductionName {}
+
+impl PartialOrd for ProductionName {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    self.uid.partial_cmp(&other.uid)
+  }
+}
+
+impl Ord for ProductionName {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.uid.cmp(&other.uid)
+  }
+}
 
 impl Display for ProductionName {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -501,7 +537,7 @@ impl Display for ProductionRef {
 }
 
 // <ProductionRule> => <ProductionRef> | <TerminalSym>
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ProductionRule {
   Intermediate(ProductionRef),
   Terminal(Terminal),
@@ -543,7 +579,7 @@ impl Display for ProductionRule {
 }
 
 // <ProductionRules> => <ProductionRule> <ProductionRules>?
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ProductionRules {
   pub rules: Vec<ProductionRule>,
   pub span: Span,
@@ -552,6 +588,16 @@ pub struct ProductionRules {
 impl ProductionRules {
   pub fn new(rules: Vec<ProductionRule>, span: Span) -> Self {
     Self { rules, span }
+  }
+
+  pub fn rule_at(&self, pos: u32) -> Option<&ProductionRule> {
+    let pos = pos as usize;
+    debug_assert!(pos <= self.rules.len());
+    if pos >= self.rules.len() {
+      return None;
+    } else {
+      return Some(&self.rules[pos]);
+    }
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Vec<Self>> {
@@ -610,8 +656,11 @@ impl Production {
     &self.rules
   }
 
-  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
-    let production_name = ProductionName::parse(iter)?;
+  pub fn parse<T: Iterator<Item = Symbol>>(
+    iter: &mut Peekable<T>,
+    state: &mut ParserState,
+  ) -> ParseResult<Self> {
+    let production_name = ProductionName::parse(iter, state)?;
 
     let arrow_span = expect_symbol!(
       iter,
@@ -653,7 +702,10 @@ enum ParsedLine {
   TerminalType(Type),
 }
 
-fn parse_line<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<ParsedLine> {
+fn parse_line<T: Iterator<Item = Symbol>>(
+  iter: &mut Peekable<T>,
+  state: &mut ParserState,
+) -> ParseResult<ParsedLine> {
   let sym = peek_symbol_or(iter, "Expected line.", Span::call_site())?;
   let sym_span = sym.span.clone();
 
@@ -687,7 +739,7 @@ fn parse_line<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult
 
       Ok(ParsedLine::TerminalType(type_spec))
     }
-    _ => Ok(ParsedLine::Production(Production::parse(iter)?)),
+    _ => Ok(ParsedLine::Production(Production::parse(iter, state)?)),
   }
 }
 
@@ -701,11 +753,12 @@ pub struct Grammar {
 impl Grammar {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
     let mut productions: HashMap<String, Rc<Production>> = HashMap::new();
+    let mut parser_state = ParserState::new();
     let mut terminal_type = None;
 
     let mut token_iter = token_stream.into_iter().peekable();
     while let Some(_) = token_iter.peek() {
-      match parse_line(&mut token_iter) {
+      match parse_line(&mut token_iter, &mut parser_state) {
         Ok(ParsedLine::Production(production)) => {
           match productions.get_mut(&production.name.name) {
             Some(prod) => {

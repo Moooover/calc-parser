@@ -177,28 +177,31 @@ struct ProductionState {
   // Ranges from [0, rules.len()], and is the position of the dot.
   pos: u32,
   // The list of possible tokens that can follow this rule.
-  possible_lookaheads: Vec<Terminal>,
+  possible_lookaheads: HashSet<Terminal>,
 }
 
 impl<'a> ProductionState {
-  pub fn new(inst: ProductionInst, possible_lookaheads: Vec<Terminal>) -> Self {
+  pub fn new<I: Iterator<Item = Terminal>>(inst: ProductionInst, possible_lookaheads: I) -> Self {
     Self {
       inst,
       pos: 0,
-      possible_lookaheads,
+      possible_lookaheads: possible_lookaheads.collect(),
     }
   }
 
-  fn from_production(production: &Production, possible_lookaheads: Vec<Terminal>) -> Vec<Self> {
+  fn from_production<I: Iterator<Item = Terminal>>(
+    production: &Production,
+    possible_lookaheads: I,
+  ) -> Vec<Self> {
+    let lookaheads = possible_lookaheads.collect::<Vec<_>>();
     ProductionInst::from_production(production)
       .into_iter()
-      .map(|inst| Self::new(inst, possible_lookaheads.clone()))
+      .map(|inst| Self::new(inst, lookaheads.clone().into_iter()))
       .collect()
   }
 
-  pub fn merge(&mut self, other: ProductionState) {
-    debug_assert!(*self == other);
-    self.possible_lookaheads.extend(other.possible_lookaheads)
+  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) {
+    self.possible_lookaheads.extend(lookaheads)
   }
 
   pub fn is_complete(&self) -> bool {
@@ -352,12 +355,25 @@ impl Closure {
   /// rules to nonterminal symbols immediately following "pos".
   fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
     let mut queue: VecDeque<ProductionState> = VecDeque::new();
-    let mut expanded_rules: HashMap<ProductionName, Vec<ProductionState>> = HashMap::new();
-    // let mut closure = Vec::new();
+    let mut expanded_rules: HashSet<ProductionState> = HashSet::new();
 
-    queue.extend(states.iter().map(|state| state.clone()));
+    queue.extend(states.iter().cloned());
 
     while let Some(state) = queue.pop_front() {
+      if let Some(mut prod_state) = expanded_rules.take(&state) {
+        // If this rule has already been expanded, we just need to merge
+        // the possible lookaheads discovered from this expansion.
+        prod_state.merge_lookaheads(state.possible_lookaheads.clone().into_iter());
+        expanded_rules.insert(prod_state);
+
+        // Don't re-expand the next symbol of this rule.
+        continue;
+      }
+
+      // If the rule wasn't found in the map, we need to add it and expand the
+      // next symbol if it is a production.
+      expanded_rules.insert(state.clone());
+
       if !state.is_complete() {
         match state.next_sym() {
           Some(ProductionRule::Intermediate(production)) => {
@@ -373,31 +389,20 @@ impl Closure {
               next_terms.extend(state.possible_lookaheads.clone());
             }
 
-            if let Some(prod_state) = expanded_rules.get_mut(&prod.name) {
-            } else {
-              let prod_states = ProductionState::from_production(
-                prod.deref().clone(),
-                next_terms.into_iter().collect(),
-              );
-              queue.extend(prod_states.into_iter());
-            }
+            let prod_states =
+              ProductionState::from_production(prod.deref().clone(), next_terms.into_iter());
+            queue.extend(prod_states);
           }
           _ => {}
         }
       }
-
-      match expanded_rules.get_mut(&state.inst.name) {
-        Some(rules) => {
-          rules.push(state);
-        }
-        None => {
-          expanded_rules.insert(state.inst.name.clone(), vec![state]);
-        }
-      }
+    }
+    for prod in &expanded_rules {
+      eprintln!("prod: {}", prod);
     }
 
     return Self {
-      states: expanded_rules.into_values().collect::<Vec<_>>().concat(),
+      states: expanded_rules.into_iter().collect::<Vec<_>>(),
     };
   }
 
@@ -557,7 +562,7 @@ impl LRTable {
       .map(|rule| {
         ProductionState::new(
           ProductionInst::new(&init_state.name, &rule, 0),
-          vec![Terminal::EndOfStream(Span::call_site())],
+          vec![Terminal::EndOfStream(Span::call_site())].into_iter(),
         )
       })
       .collect();

@@ -25,8 +25,10 @@ pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   // return syn_tree.into();
 
   return TokenStream::from(quote! {
-    let var = #l;
-    println!("{}", var);
+    let var1 = #s;
+    let var2 = #l;
+    println!("{}", var1);
+    println!("{}", var2);
   });
 
   // let token_stream = list.iter().map(|sym| {

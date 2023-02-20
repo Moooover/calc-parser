@@ -335,6 +335,10 @@ pub struct ProductionName {
 }
 
 impl ProductionName {
+  pub fn name(&self) -> &str {
+    &self.name
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(
     iter: &mut Peekable<T>,
     state: &mut ParserState,
@@ -411,7 +415,7 @@ impl Ord for ProductionName {
 
 impl Display for ProductionName {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    write!(f, "<{}>", self.name)?;
+    write!(f, "{}", self.name)?;
     if let Some(type_spec) = &self.type_spec {
       write!(f, ": {}", type_spec)?;
     }
@@ -584,6 +588,10 @@ pub struct ProductionRules {
 impl ProductionRules {
   pub fn new(rules: Vec<ProductionRule>, span: Span) -> Self {
     Self { rules, span }
+  }
+
+  pub fn len(&self) -> u32 {
+    self.rules.len() as u32
   }
 
   pub fn rule_at(&self, pos: u32) -> Option<&ProductionRule> {

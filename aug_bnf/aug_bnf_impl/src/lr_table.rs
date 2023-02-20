@@ -27,13 +27,17 @@ struct ProductionInst {
   name: ProductionName,
   // The rules that make up this production, i.e. the RHS.
   rules: ProductionRules,
+  // The index of this rule in the list of possible expansions of a rule. Used
+  // only to uniquely identify rule instances.
+  rule_idx: u32,
 }
 
 impl ProductionInst {
-  pub fn new(name: &ProductionName, rules: &ProductionRules) -> Self {
+  pub fn new(name: &ProductionName, rules: &ProductionRules, rule_idx: u32) -> Self {
     Self {
       name: name.clone(),
       rules: rules.clone(),
+      rule_idx,
     }
   }
 
@@ -41,13 +45,18 @@ impl ProductionInst {
     production
       .rules
       .iter()
-      .map(|rules| Self {
+      .enumerate()
+      .map(|(idx, rules)| Self {
         name: production.name.clone(),
         rules: rules.clone(),
+        rule_idx: idx as u32,
       })
       .collect()
   }
 
+  // Returns the list of possible next terminals that this rule could match
+  // after `pos` rules have already been matched. May include epsilon, which
+  // means the rule is skippable.
   pub fn calculate_first_set(
     &self,
     pos: u32,
@@ -78,27 +87,14 @@ impl ProductionInst {
       Some(ProductionRule::Intermediate(production_ref)) => {
         let prod_ptr = production_ref.deref();
         let production: &Production = prod_ptr.deref();
-        // calculate_first_set doesn't ever use possible_lookaheads, so we can
-        // set it to the empty set.
         let prod_insts = Self::from_production(production);
         terms.extend(prod_insts.iter().fold(HashSet::new(), |mut terms, inst| {
           terms.extend(inst.calculate_first_set(0, first_cache));
           terms
         }));
-
-        // If terms includes epsilon, we have to include all possible first
-        // symbols of the advanced production state. The terminal's span isn't
-        // used in equality comparison, so it can be set to anything.
-        if terms.remove(&Terminal::Epsilon(Span::call_site())) {
-          terms.extend(self.calculate_first_set(pos + 1, first_cache));
-        }
       }
       Some(ProductionRule::Terminal(terminal)) => {
-        if let Terminal::Epsilon(_) = terminal {
-          terms.extend(self.calculate_first_set(pos + 1, first_cache));
-        } else {
-          terms.insert(terminal.clone());
-        }
+        terms.insert(terminal.clone());
       }
       // If the production is finished, return epsilon. This epsilon was not
       // defined explicitly in the macro, so its span is the call site.
@@ -122,6 +118,16 @@ impl ProductionInst {
       }
     }
 
+    // If terms includes epsilon, we have to include all possible first
+    // symbols of the advanced production state. The terminal's span isn't
+    // used in equality comparison, so it can be set to anything.
+    // Only do this if this rule isn't complete yet. Otherwise, the presence of
+    // epsilon means that this rule is skippable from this point, and therefore
+    // the lookahead terminals are also possible first token.
+    if pos != self.rules.len() && terms.remove(&Terminal::Epsilon(Span::call_site())) {
+      terms.extend(self.calculate_first_set(pos + 1, first_cache));
+    }
+
     return terms;
   }
 }
@@ -129,12 +135,13 @@ impl ProductionInst {
 impl Hash for ProductionInst {
   fn hash<H: Hasher>(&self, state: &mut H) {
     self.name.hash(state);
+    self.rule_idx.hash(state);
   }
 }
 
 impl PartialEq for ProductionInst {
   fn eq(&self, other: &Self) -> bool {
-    self.name == other.name
+    self.name == other.name && self.rule_idx == other.rule_idx
   }
 }
 
@@ -142,13 +149,19 @@ impl Eq for ProductionInst {}
 
 impl PartialOrd for ProductionInst {
   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-    self.name.partial_cmp(&other.name)
+    self
+      .name
+      .partial_cmp(&other.name)
+      .and_then(|cmp| Some(cmp.then(self.rule_idx.partial_cmp(&other.rule_idx)?)))
   }
 }
 
 impl Ord for ProductionInst {
   fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-    self.name.cmp(&other.name)
+    self
+      .name
+      .cmp(&other.name)
+      .then(self.rule_idx.cmp(&other.rule_idx))
   }
 }
 
@@ -243,15 +256,26 @@ impl Ord for ProductionState {
 
 impl Display for ProductionState {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let mut rule_strs: Vec<_> = self
+      .inst
+      .rules
+      .rules
+      .iter()
+      .map(|rule| format!("{}", rule))
+      .collect();
+    rule_strs.insert(self.pos as usize, ".".to_string());
+
     write!(
       f,
-      "[{} {}, {}]",
-      self.inst.name,
-      self.pos,
+      "[<{}> => {}, {}]",
+      self.inst.name.name(),
+      rule_strs.join(" "),
       &self
         .possible_lookaheads
         .iter()
-        .fold("".to_string(), |s, sym| s + "/" + &format!("{}", sym))[1..]
+        .map(|sym| format!("{}", sym))
+        .collect::<Vec<_>>()
+        .join("/")
     )
   }
 }
@@ -269,6 +293,7 @@ impl Closure {
   // rules to nonterminal symbols immediately following "pos".
   fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
     let mut queue: VecDeque<ProductionState> = VecDeque::new();
+    let mut expanded_rules: HashSet<ProductionName> = HashSet::new();
     let mut closure = Vec::new();
 
     queue.extend(states.iter().map(|state| state.clone()));
@@ -276,21 +301,33 @@ impl Closure {
     while let Some(state) = queue.pop_front() {
       if !state.is_complete() {
         match state.next_sym() {
-          Some(ProductionRule::Intermediate(production)) => match &production.production {
-            ProductionRefT::Resolved(prod_ptr) => {
-              let prod = prod_ptr.upgrade().unwrap();
-              let next_terms = state.inst.calculate_first_set(state.pos + 1, first_cache);
-              let prod_states = ProductionState::from_production(
-                prod.deref().clone(),
-                next_terms.into_iter().collect(),
-              );
-              queue.extend(prod_states.into_iter());
+          Some(ProductionRule::Intermediate(production)) => {
+            let prod = production.deref();
+            // Skip rules that have already been expanded, or recursive
+            // references to this rule.
+            if prod.name == state.inst.name || expanded_rules.contains(&prod.name) {
+              continue;
             }
-            _ => panic!("Unexpected unresolved intermediate"),
-          },
+
+            let mut next_terms = state.inst.calculate_first_set(state.pos + 1, first_cache);
+
+            // If next_terms includes epsilon, the rest of this state is
+            // skippable, so include possible_lookaheads.
+            if next_terms.remove(&Terminal::Epsilon(Span::call_site())) {
+              next_terms.extend(state.possible_lookaheads.clone());
+            }
+
+            let prod_states = ProductionState::from_production(
+              prod.deref().clone(),
+              next_terms.into_iter().collect(),
+            );
+            queue.extend(prod_states.into_iter());
+          }
           _ => {}
         }
       }
+
+      expanded_rules.insert(state.inst.name.clone());
       closure.push(state);
     }
 
@@ -391,10 +428,10 @@ impl Eq for LRState {}
 impl Display for LRState {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     for (i, state) in self.states.iter().enumerate() {
-      write!(f, "{}", state)?;
       if i != 0 {
         write!(f, ", ")?;
       }
+      write!(f, "{}", state)?;
     }
     Ok(())
   }
@@ -415,10 +452,11 @@ impl LRTable {
     }
   }
 
-  pub fn calculate_transitions(&mut self, states: &Vec<ProductionState>) -> TransitionSet {
+  fn calculate_transitions(&mut self, states: &Vec<ProductionState>) -> TransitionSet {
     let trans_set = TransitionSet::new();
 
     let closure = Closure::from_lr_states(states, &mut self.first_table);
+    // TODO do rest of algo here.
     self.states.insert(Rc::new(LRState::new(
       closure.states.into_iter(),
       TransitionSet::new(),
@@ -426,19 +464,14 @@ impl LRTable {
 
     trans_set
   }
-}
 
-impl From<Grammar> for LRTable {
-  fn from(grammar: Grammar) -> Self {
+  pub fn from_grammar(grammar: &Grammar) -> Self {
     let mut table = LRTable::new();
 
     let init_state_ptr = grammar.starting_rule();
     let init_state = init_state_ptr.deref();
     let x = ProductionState::new(
-      ProductionInst {
-        name: init_state.name.clone(),
-        rules: init_state.rules[0].clone(),
-      },
+      ProductionInst::new(&init_state.name, &init_state.rules[0], 0),
       vec![Terminal::EndOfStream(Span::call_site())],
     );
     table.calculate_transitions(&vec![x]);

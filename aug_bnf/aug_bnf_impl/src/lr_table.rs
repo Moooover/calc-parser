@@ -1,15 +1,14 @@
 use proc_macro::Span;
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
 
 use crate::production::{
-  Production, ProductionName, ProductionRefT, ProductionRule, ProductionRules, Terminal,
+  Grammar, Production, ProductionName, ProductionRule, ProductionRules, Terminal,
 };
-
-use crate::production::Grammar;
 
 enum FirstCacheState {
   Hit(HashSet<Terminal>),
@@ -54,9 +53,9 @@ impl ProductionInst {
       .collect()
   }
 
-  // Returns the list of possible next terminals that this rule could match
-  // after `pos` rules have already been matched. May include epsilon, which
-  // means the rule is skippable.
+  /// Returns the list of possible next terminals that this rule could match
+  /// after `pos` rules have already been matched. May include epsilon, which
+  /// means the rule is skippable.
   pub fn calculate_first_set(
     &self,
     pos: u32,
@@ -115,6 +114,8 @@ impl ProductionInst {
           }
           _ => {}
         }
+      } else {
+        debug_assert!(false, "Expected state to be pending in the cache.");
       }
     }
 
@@ -168,7 +169,7 @@ impl Ord for ProductionInst {
 /// A production state is an instance of a production and how far through the
 /// production we've parsed so far (represented by a dot).
 ///
-/// i.e. A -> b . C d
+/// i.e. `A -> b . C d`
 /// indicates that b has already been parsed, and we're ready to parse C d.
 #[derive(Clone)]
 struct ProductionState {
@@ -280,61 +281,6 @@ impl Display for ProductionState {
   }
 }
 
-/// A state in the parsing DFA, which contains the set of all possible
-/// productions that we could currently be parsing. Note that these rules must
-/// be compatible with each other, meaning they have all the same tokens before
-/// the '.'.
-struct Closure {
-  states: Vec<ProductionState>,
-}
-
-impl Closure {
-  // List all derivative states from this one via application of production
-  // rules to nonterminal symbols immediately following "pos".
-  fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
-    let mut queue: VecDeque<ProductionState> = VecDeque::new();
-    let mut expanded_rules: HashSet<ProductionName> = HashSet::new();
-    let mut closure = Vec::new();
-
-    queue.extend(states.iter().map(|state| state.clone()));
-
-    while let Some(state) = queue.pop_front() {
-      if !state.is_complete() {
-        match state.next_sym() {
-          Some(ProductionRule::Intermediate(production)) => {
-            let prod = production.deref();
-            // Skip rules that have already been expanded, or recursive
-            // references to this rule.
-            if prod.name == state.inst.name || expanded_rules.contains(&prod.name) {
-              continue;
-            }
-
-            let mut next_terms = state.inst.calculate_first_set(state.pos + 1, first_cache);
-
-            // If next_terms includes epsilon, the rest of this state is
-            // skippable, so include possible_lookaheads.
-            if next_terms.remove(&Terminal::Epsilon(Span::call_site())) {
-              next_terms.extend(state.possible_lookaheads.clone());
-            }
-
-            let prod_states = ProductionState::from_production(
-              prod.deref().clone(),
-              next_terms.into_iter().collect(),
-            );
-            queue.extend(prod_states.into_iter());
-          }
-          _ => {}
-        }
-      }
-
-      expanded_rules.insert(state.inst.name.clone());
-      closure.push(state);
-    }
-
-    return Self { states: closure };
-  }
-}
-
 enum Action {
   Shift(Terminal),
   Reduce(Weak<Production>),
@@ -369,43 +315,165 @@ impl PartialEq for Action {
 
 impl Eq for Action {}
 
+impl Display for Action {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    match self {
+      Action::Reduce(production_ptr) => {
+        write!(
+          f,
+          "reduce({})",
+          production_ptr.upgrade().unwrap().name.name()
+        )
+      }
+      Action::Shift(terminal) => {
+        write!(f, "shift({})", terminal)
+      }
+    }
+  }
+}
+
 // struct Transition {
 //   action: Action,
 //   next_state: ProductionState,
 // }
 
-struct TransitionSet {
-  // TODO figure out how to represent these, will need lookup on actions and
-  // productionstates (for duplicate state checking)
-  transitions: HashMap<Action, ProductionState>,
+type TransitionSet = HashMap<Action, Rc<LRState>>;
+
+/// A state in the parsing DFA, which contains the set of all possible
+/// productions that we could currently be parsing. Note that these rules must
+/// be compatible with each other, meaning they have all the same tokens before
+/// the '.'.
+struct Closure {
+  states: Vec<ProductionState>,
 }
 
-impl TransitionSet {
-  pub fn new() -> Self {
-    Self {
-      transitions: HashMap::new(),
+impl Closure {
+  /// List all derivative states from this one via application of production
+  /// rules to nonterminal symbols immediately following "pos".
+  fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
+    let mut queue: VecDeque<ProductionState> = VecDeque::new();
+    let mut expanded_rules: HashMap<ProductionName, Vec<ProductionState>> = HashMap::new();
+    // let mut closure = Vec::new();
+
+    queue.extend(states.iter().map(|state| state.clone()));
+
+    while let Some(state) = queue.pop_front() {
+      if !state.is_complete() {
+        match state.next_sym() {
+          Some(ProductionRule::Intermediate(production)) => {
+            let prod = production.deref();
+            // Don't expand rules that have already been expanded, or recursive
+            // references to this rule.
+            // if prod.name != state.inst.name && !expanded_rules.contains(&prod.name) {
+            let mut next_terms = state.inst.calculate_first_set(state.pos + 1, first_cache);
+
+            // If next_terms includes epsilon, the rest of this state is
+            // skippable, so include possible_lookaheads.
+            if next_terms.remove(&Terminal::Epsilon(Span::call_site())) {
+              next_terms.extend(state.possible_lookaheads.clone());
+            }
+
+            if let Some(prod_state) = expanded_rules.get_mut(&prod.name) {
+            } else {
+              let prod_states = ProductionState::from_production(
+                prod.deref().clone(),
+                next_terms.into_iter().collect(),
+              );
+              queue.extend(prod_states.into_iter());
+            }
+          }
+          _ => {}
+        }
+      }
+
+      match expanded_rules.get_mut(&state.inst.name) {
+        Some(rules) => {
+          rules.push(state);
+        }
+        None => {
+          expanded_rules.insert(state.inst.name.clone(), vec![state]);
+        }
+      }
     }
+
+    return Self {
+      states: expanded_rules.into_values().collect::<Vec<_>>().concat(),
+    };
   }
 
-  pub fn add(&mut self, action: Action, next_state: ProductionState) {
-    match self.transitions.get(&action) {
-      Some(production_state) => {}
-      None => {}
+  /// Computes the set of actions that can be taken from this state, and the
+  /// list of production states that each action would yield.
+  fn transitions(&self) -> HashMap<Action, Vec<ProductionState>> {
+    let mut transitions: HashMap<Action, Vec<ProductionState>> = HashMap::new();
+    eprintln!("{}", self);
+
+    for state in &self.states {
+      if state.is_complete() {
+        // Completed states don't have any transitions.
+        continue;
+      }
+
+      let action = match state.next_sym() {
+        Some(ProductionRule::Intermediate(intermediate)) => {
+          Action::Reduce(intermediate.deref_weak())
+        }
+        Some(ProductionRule::Terminal(term)) => Action::Shift(term.clone()),
+        None => unreachable!(),
+      };
+
+      match transitions.get_mut(&action) {
+        Some(lr_state) => {
+          lr_state.push(state.advance());
+        }
+        None => {
+          transitions.insert(action, vec![state.advance()]);
+        }
+      }
     }
+
+    for (action, prod_states) in &transitions {
+      eprintln!(
+        "transz: {} -> {}",
+        action,
+        prod_states
+          .iter()
+          .map(|state| format!("{}", state))
+          .collect::<Vec<_>>()
+          .join(", ")
+      );
+    }
+
+    transitions
+  }
+}
+
+impl Display for Closure {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for (i, state) in self.states.iter().enumerate() {
+      if i != 0 {
+        write!(f, ", ")?;
+      }
+      write!(f, "{}", state)?;
+    }
+    Ok(())
   }
 }
 
 struct LRState {
   states: BTreeSet<ProductionState>,
-  transitions: TransitionSet,
+  transitions: Option<TransitionSet>,
 }
 
 impl LRState {
-  pub fn new<I: Iterator<Item = ProductionState>>(states: I, transitions: TransitionSet) -> Self {
+  pub fn new<I: Iterator<Item = ProductionState>>(states: I) -> Self {
     Self {
       states: states.collect(),
-      transitions,
+      transitions: None,
     }
+  }
+
+  fn set_transitions(&mut self, transitions: TransitionSet) {
+    self.transitions = Some(transitions);
   }
 }
 
@@ -439,30 +507,43 @@ impl Display for LRState {
 
 pub struct LRTable {
   states: HashSet<Rc<LRState>>,
-  entries: HashMap<Action, Rc<LRState>>,
   first_table: ProductionFirstTable,
+  initial_state: Option<Rc<LRState>>,
 }
 
 impl LRTable {
   pub fn new() -> Self {
     LRTable {
       states: HashSet::new(),
-      entries: HashMap::new(),
       first_table: HashMap::new(),
+      initial_state: None,
     }
   }
 
-  fn calculate_transitions(&mut self, states: &Vec<ProductionState>) -> TransitionSet {
-    let trans_set = TransitionSet::new();
+  fn calculate_transitions(&mut self, prod_states: &Vec<ProductionState>) -> Rc<LRState> {
+    let lr_state = LRState::new(prod_states.clone().into_iter());
+    if let Some(lr_state) = self.states.get(&lr_state) {
+      return lr_state.clone();
+    }
 
-    let closure = Closure::from_lr_states(states, &mut self.first_table);
-    // TODO do rest of algo here.
-    self.states.insert(Rc::new(LRState::new(
-      closure.states.into_iter(),
-      TransitionSet::new(),
-    )));
+    let lr_state = Rc::new(lr_state);
+    self.states.insert(lr_state);
 
-    trans_set
+    let closure = Closure::from_lr_states(prod_states, &mut self.first_table);
+    eprintln!("{}", closure);
+    let transitions = closure.transitions();
+    let mut transition_set = TransitionSet::new();
+
+    for (action, prod_states) in transitions.into_iter() {
+      let child_lr_state = self.calculate_transitions(&prod_states);
+      transition_set.insert(action, child_lr_state);
+    }
+
+    // TODO mutate this in place with RefCell.
+    let mut lr_state = LRState::new(prod_states.clone().into_iter());
+    lr_state.set_transitions(transition_set);
+    let lr_state = Rc::new(lr_state);
+    return lr_state;
   }
 
   pub fn from_grammar(grammar: &Grammar) -> Self {
@@ -470,11 +551,18 @@ impl LRTable {
 
     let init_state_ptr = grammar.starting_rule();
     let init_state = init_state_ptr.deref();
-    let x = ProductionState::new(
-      ProductionInst::new(&init_state.name, &init_state.rules[0], 0),
-      vec![Terminal::EndOfStream(Span::call_site())],
-    );
-    table.calculate_transitions(&vec![x]);
+    let initial_lr_state = init_state
+      .rules()
+      .iter()
+      .map(|rule| {
+        ProductionState::new(
+          ProductionInst::new(&init_state.name, &rule, 0),
+          vec![Terminal::EndOfStream(Span::call_site())],
+        )
+      })
+      .collect();
+    let initial_state = table.calculate_transitions(&initial_lr_state);
+    table.initial_state = Some(initial_state);
 
     return table;
   }
@@ -483,7 +571,7 @@ impl LRTable {
 impl Display for LRTable {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     for state in self.states.iter() {
-      write!(f, "{} ", state)?;
+      write!(f, "{}\n", state)?;
     }
     Ok(())
   }

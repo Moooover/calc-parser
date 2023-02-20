@@ -1,8 +1,8 @@
 #![feature(get_mut_unchecked)]
+#![allow(dead_code)]
 
 mod aug_bnf_dyn;
 
-use aug_bnf_dyn::{GrammarParser, Production};
 use std::rc::Rc;
 
 pub fn fmt2<T: std::fmt::Display>(v: &Vec<T>) {
@@ -492,12 +492,9 @@ fn main() {
   aug_bnf_impl::aug_bnf! {
     terminal: char;
 
-    <S>: std::Vec<u64> => <A> <alias: B> $;
-    <A>: i32 => 'a' <B>;
-    <A>: i32 => <B>;
-    <B> => !;
-    <B> => 'b';
-    <B> => char::last;
-    <B> => <B>;
+    <S> => <A> $;
+    <A> => <A> <B>;
+    <A> => 'a' 'b';
+    <B> => 'a' 'c';
   };
 }

@@ -42,15 +42,18 @@ pub fn test_fn() {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-
   #[test]
-  fn it_works() {
+  fn add_mul_grammar() {
     aug_bnf_impl::aug_bnf! {
       terminal: char;
-      <S> => <A> <B>;
-      <A> => 'a' <B>;
-      <B> => 'b';
+
+      <S> => <A> $;
+      <A> => <A> '+' <P>;
+      <A> => <P>;
+      <P> => <P> '*' <V>;
+      <P> => <V>;
+      <V> => 'a';
+      <V> => 'b';
     };
   }
 }

@@ -210,11 +210,19 @@ impl Terminal {
           iter.next();
         }
         SymbolT::Literal(_) => {
+          // Literals only appear alone.
+          if !tokens.is_empty() {
+            abort!(sym.span, "Unexpected literal.");
+          }
+
           tokens.extend(sym.tokens.clone());
           span = span_join_opt!(span, sym.span);
 
           // Consume the symbol.
           iter.next();
+
+          // Literals only appear alone.
+          break;
         }
         SymbolT::Op(Operator::Scope) => {
           tokens.extend(sym.tokens.clone());
@@ -279,11 +287,15 @@ impl Hash for Terminal {
             state.write_u64(3);
             ident.to_string().hash(state);
           }
-          TokenTree::Punct(punct) => {
+          TokenTree::Literal(literal) => {
             state.write_u64(4);
+            literal.to_string().hash(state);
+          }
+          TokenTree::Punct(punct) => {
+            state.write_u64(5);
             punct.as_char().hash(state);
           }
-          _ => panic!("Unexpected token in terminal"),
+          _ => abort!(sym.span, "Unexpected token in terminal"),
         });
       }
     };
@@ -302,6 +314,9 @@ impl PartialEq for Terminal {
       .all(|(token1, token2)| match (token1, token2) {
         (TokenTree::Ident(ident1), TokenTree::Ident(ident2)) => {
           ident1.to_string() == ident2.to_string()
+        }
+        (TokenTree::Literal(literal1), TokenTree::Literal(literal2)) => {
+          literal1.to_string() == literal2.to_string()
         }
         (TokenTree::Punct(punct1), TokenTree::Punct(punct2)) => {
           punct1.as_char() == punct2.as_char()
@@ -450,6 +465,18 @@ impl ProductionRef {
   pub fn deref(&self) -> Rc<Production> {
     match &self.production {
       ProductionRefT::Resolved(resolved) => resolved.upgrade().unwrap().clone(),
+      ProductionRefT::Unresolved(unresolved) => {
+        panic!(
+          "Attempt to resolve unresolved production ref {}",
+          unresolved
+        );
+      }
+    }
+  }
+
+  pub fn deref_weak(&self) -> Weak<Production> {
+    match &self.production {
+      ProductionRefT::Resolved(resolved) => resolved.clone(),
       ProductionRefT::Unresolved(unresolved) => {
         panic!(
           "Attempt to resolve unresolved production ref {}",
@@ -693,7 +720,7 @@ impl Display for Production {
     write!(f, "{} => ", self.name)?;
     for (i, rule) in self.rules.iter().enumerate() {
       if i != 0 {
-        write!(f, "\n{}", " ".repeat(self.name.name.len() + 6))?;
+        write!(f, "\n{}", " ".repeat(self.name.name.len() + 4))?;
       }
       write!(f, "{}", rule)?;
     }

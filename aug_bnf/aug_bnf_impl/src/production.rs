@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::Peekable;
-use std::ops::Deref;
 use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
@@ -183,11 +182,11 @@ impl From<Span> for TransparentSpan {
   }
 }
 impl Hash for TransparentSpan {
-  fn hash<H: Hasher>(&self, state: &mut H) {}
+  fn hash<H: Hasher>(&self, _state: &mut H) {}
 }
 
 impl PartialEq for TransparentSpan {
-  fn eq(&self, other: &Self) -> bool {
+  fn eq(&self, _other: &Self) -> bool {
     true
   }
 }
@@ -195,13 +194,13 @@ impl PartialEq for TransparentSpan {
 impl Eq for TransparentSpan {}
 
 impl PartialOrd for TransparentSpan {
-  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+  fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
     Some(std::cmp::Ordering::Equal)
   }
 }
 
 impl Ord for TransparentSpan {
-  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+  fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
     std::cmp::Ordering::Equal
   }
 }

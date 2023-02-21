@@ -498,14 +498,18 @@ fn main() {
   //   <B> => 'a' 'c';
   // };
 
-  // aug_bnf_impl::aug_bnf! {
-  //   terminal: char;
+  aug_bnf_impl::aug_bnf! {
+    terminal: char;
 
-  //   <I> => <S>;
-  //   <S> => 'a' <S> 'x' | 'c' <S> 'z' | <B>;
-  //   <B> => <B> 'b' | !;
-  // }
+    <I> => <S>;
+    <S> => 'a' <S> 'x'
+         | 'c' <S> 'z'
+         | <B>;
+    <B> => <B> 'b'
+         | !;
+  }
 
+  /*
   aug_bnf_impl::aug_bnf! {
     terminal: CToken;
 
@@ -587,4 +591,5 @@ fn main() {
     <true> => 'y';
     <false> => 'z';
   }
+  */
 }

@@ -167,27 +167,129 @@ impl Display for Type {
 }
 
 #[derive(Clone, Debug)]
+pub struct TransparentSpan {
+  span: Span,
+}
+
+impl TransparentSpan {
+  pub fn span(&self) -> &Span {
+    &self.span
+  }
+}
+
+impl From<Span> for TransparentSpan {
+  fn from(span: Span) -> Self {
+    Self { span }
+  }
+}
+impl Hash for TransparentSpan {
+  fn hash<H: Hasher>(&self, state: &mut H) {}
+}
+
+impl PartialEq for TransparentSpan {
+  fn eq(&self, other: &Self) -> bool {
+    true
+  }
+}
+
+impl Eq for TransparentSpan {}
+
+impl PartialOrd for TransparentSpan {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    Some(std::cmp::Ordering::Equal)
+  }
+}
+
+impl Ord for TransparentSpan {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    std::cmp::Ordering::Equal
+  }
+}
+
+#[derive(Clone, Debug)]
 pub struct TerminalSym {
   pub tokens: TokenStream,
-  pub span: Span,
+  pub span: TransparentSpan,
+}
+
+impl Hash for TerminalSym {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.tokens.clone().into_iter().for_each(|tt| match tt {
+      TokenTree::Ident(ident) => {
+        state.write_u64(3);
+        ident.to_string().hash(state);
+      }
+      TokenTree::Literal(literal) => {
+        state.write_u64(4);
+        literal.to_string().hash(state);
+      }
+      TokenTree::Punct(punct) => {
+        state.write_u64(5);
+        punct.as_char().hash(state);
+      }
+      _ => abort!(self.span.span(), "Unexpected token in terminal"),
+    });
+  }
+}
+
+impl PartialEq for TerminalSym {
+  fn eq(&self, other: &Self) -> bool {
+    std::iter::zip(
+      self.tokens.clone().into_iter(),
+      other.tokens.clone().into_iter(),
+    )
+    .all(|(token1, token2)| match (token1, token2) {
+      (TokenTree::Ident(ident1), TokenTree::Ident(ident2)) => {
+        ident1.to_string() == ident2.to_string()
+      }
+      (TokenTree::Literal(literal1), TokenTree::Literal(literal2)) => {
+        literal1.to_string() == literal2.to_string()
+      }
+      (TokenTree::Punct(punct1), TokenTree::Punct(punct2)) => punct1.as_char() == punct2.as_char(),
+      _ => false,
+    })
+  }
+}
+
+impl Eq for TerminalSym {}
+
+impl PartialOrd for TerminalSym {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    self
+      .tokens
+      .to_string()
+      .partial_cmp(&other.tokens.to_string())
+  }
+}
+
+impl Ord for TerminalSym {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.tokens.to_string().cmp(&other.tokens.to_string())
+  }
+}
+
+impl Display for TerminalSym {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.tokens)
+  }
 }
 
 // <TerminalSym> => <Ident>
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Terminal {
   // '$'
-  EndOfStream(Span),
+  EndOfStream(TransparentSpan),
   // '!'
-  Epsilon(Span),
+  Epsilon(TransparentSpan),
   Sym(TerminalSym),
 }
 
 impl Terminal {
   pub fn span(&self) -> Span {
     match self {
-      Terminal::EndOfStream(span) => *span,
-      Terminal::Epsilon(span) => *span,
-      Terminal::Sym(sym) => sym.span,
+      Terminal::EndOfStream(span) => span.span().clone(),
+      Terminal::Epsilon(span) => span.span().clone(),
+      Terminal::Sym(sym) => sym.span.span().clone(),
     }
   }
 
@@ -238,7 +340,7 @@ impl Terminal {
             let sym_span = sym.span;
             // Consume the symbol.
             iter.next();
-            return Ok(Terminal::EndOfStream(sym_span));
+            return Ok(Terminal::EndOfStream(sym_span.into()));
           }
           break;
         }
@@ -249,7 +351,7 @@ impl Terminal {
             let sym_span = sym.span;
             // Consume the symbol.
             iter.next();
-            return Ok(Terminal::Epsilon(sym_span));
+            return Ok(Terminal::Epsilon(sym_span.into()));
           }
           break;
         }
@@ -266,7 +368,7 @@ impl Terminal {
 
     Ok(Terminal::Sym(TerminalSym {
       tokens,
-      span: span.unwrap(),
+      span: span.unwrap().into(),
     }))
   }
 }
@@ -282,60 +384,18 @@ impl Hash for Terminal {
       }
       Terminal::Sym(sym) => {
         state.write_u64(2);
-        sym.tokens.clone().into_iter().for_each(|tt| match tt {
-          TokenTree::Ident(ident) => {
-            state.write_u64(3);
-            ident.to_string().hash(state);
-          }
-          TokenTree::Literal(literal) => {
-            state.write_u64(4);
-            literal.to_string().hash(state);
-          }
-          TokenTree::Punct(punct) => {
-            state.write_u64(5);
-            punct.as_char().hash(state);
-          }
-          _ => abort!(sym.span, "Unexpected token in terminal"),
-        });
+        sym.hash(state);
       }
     };
   }
 }
-
-impl PartialEq for Terminal {
-  fn eq(&self, other: &Self) -> bool {
-    match (self, other) {
-      (Terminal::EndOfStream(_1), Terminal::EndOfStream(_2)) => true,
-      (Terminal::Epsilon(_1), Terminal::Epsilon(_2)) => true,
-      (Terminal::Sym(sym1), Terminal::Sym(sym2)) => std::iter::zip(
-        sym1.tokens.clone().into_iter(),
-        sym2.tokens.clone().into_iter(),
-      )
-      .all(|(token1, token2)| match (token1, token2) {
-        (TokenTree::Ident(ident1), TokenTree::Ident(ident2)) => {
-          ident1.to_string() == ident2.to_string()
-        }
-        (TokenTree::Literal(literal1), TokenTree::Literal(literal2)) => {
-          literal1.to_string() == literal2.to_string()
-        }
-        (TokenTree::Punct(punct1), TokenTree::Punct(punct2)) => {
-          punct1.as_char() == punct2.as_char()
-        }
-        _ => false,
-      }),
-      _ => false,
-    }
-  }
-}
-
-impl Eq for Terminal {}
 
 impl Display for Terminal {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
       Terminal::EndOfStream(_span) => write!(f, "$"),
       Terminal::Epsilon(_span) => write!(f, "!"),
-      Terminal::Sym(sym) => write!(f, "{}", sym.tokens),
+      Terminal::Sym(sym) => write!(f, "{}", sym),
     }
   }
 }
@@ -631,7 +691,7 @@ impl ProductionRules {
     }
   }
 
-  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Vec<Self>> {
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let mut rules = Vec::new();
     let mut span = None;
 
@@ -639,15 +699,18 @@ impl ProductionRules {
       let sym = peek_symbol_or(iter, "Unexpected end of stream.", Span::call_site())?;
 
       match sym.sym {
-        SymbolT::Op(Operator::Semicolon) => {
+        SymbolT::Op(Operator::Semicolon) | SymbolT::Op(Operator::Pipe) => {
           if rules.len() == 0 {
-            return ParseError::new("Unexpected ';', expect production rule.", sym.span).into();
+            return ParseError::new(
+              &format!("Unexpected {}, expect production rule.", sym),
+              sym.span,
+            )
+            .into();
           } else {
-            iter.next();
-            return Ok(vec![Self {
+            return Ok(Self {
               rules,
               span: span.unwrap(),
-            }]);
+            });
           }
         }
         _ => {
@@ -670,6 +733,7 @@ impl Display for ProductionRules {
 }
 
 // <Production> => <ProductionName> "=>" <ProductionRules>
+//               | <Production> "|" <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
 pub struct Production {
   pub name: ProductionName,
@@ -700,16 +764,48 @@ impl Production {
       production_name.span
     );
 
-    let production_rules = ProductionRules::parse(iter)?;
+    let mut production_rules_list = vec![ProductionRules::parse(iter)?];
+    loop {
+      let sym = peek_symbol_or(iter, "Unexpected end of stream.", Span::call_site())?;
+
+      match sym.sym {
+        SymbolT::Op(Operator::Semicolon) => {
+          break;
+        }
+        SymbolT::Op(Operator::Pipe) => {
+          // Consume the pipe.
+          iter.next();
+
+          let production_rules = ProductionRules::parse(iter)?;
+          production_rules_list.push(production_rules);
+        }
+        _ => {
+          return ParseError::new(
+            &format!("Unexpected {}, expect production rule.", sym),
+            sym.span,
+          )
+          .into();
+        }
+      }
+    }
+
+    let semicolon_span = expect_symbol!(
+      iter,
+      SymbolT::Op(Operator::Semicolon),
+      "Expected \";\" to end production definition.",
+      production_name.span
+    );
+
     let span = span_join!(
       production_name.span,
       arrow_span,
-      iter_span(production_rules.iter().map(|rule| rule.span))
+      iter_span(production_rules_list.iter().map(|rules| rules.span)),
+      semicolon_span
     );
 
     Ok(Self {
       name: production_name,
-      rules: production_rules,
+      rules: production_rules_list,
       span,
     })
   }

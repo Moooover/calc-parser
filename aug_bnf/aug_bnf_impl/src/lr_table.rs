@@ -98,7 +98,7 @@ impl ProductionInst {
       // If the production is finished, return epsilon. This epsilon was not
       // defined explicitly in the macro, so its span is the call site.
       None => {
-        terms.insert(Terminal::Epsilon(Span::call_site()));
+        terms.insert(Terminal::Epsilon(Span::call_site().into()));
       }
     }
 
@@ -125,7 +125,7 @@ impl ProductionInst {
     // Only do this if this rule isn't complete yet. Otherwise, the presence of
     // epsilon means that this rule is skippable from this point, and therefore
     // the lookahead terminals are also possible first token.
-    if pos != self.rules.len() && terms.remove(&Terminal::Epsilon(Span::call_site())) {
+    if pos != self.rules.len() && terms.remove(&Terminal::Epsilon(Span::call_site().into())) {
       terms.extend(self.calculate_first_set(pos + 1, first_cache));
     }
 
@@ -166,27 +166,30 @@ impl Ord for ProductionInst {
   }
 }
 
-/// A production state is an instance of a production and how far through the
-/// production we've parsed so far (represented by a dot).
-///
-/// i.e. `A -> b . C d`
-/// indicates that b has already been parsed, and we're ready to parse C d.
+/// A partial production state is a production state that hasn't finalized its
+/// list of possible_lookaheads. The only difference between this struct and
+/// `ProductionState` is that this ignores `possible_lookaheads` for equality
+/// comparison and hash calculation.
 #[derive(Clone)]
-struct ProductionState {
+struct PartialProductionState {
   inst: ProductionInst,
   // Ranges from [0, rules.len()], and is the position of the dot.
   pos: u32,
   // The list of possible tokens that can follow this rule.
-  possible_lookaheads: HashSet<Terminal>,
+  possible_lookaheads: BTreeSet<Terminal>,
 }
 
-impl<'a> ProductionState {
+impl<'a> PartialProductionState {
   pub fn new<I: Iterator<Item = Terminal>>(inst: ProductionInst, possible_lookaheads: I) -> Self {
     Self {
       inst,
       pos: 0,
       possible_lookaheads: possible_lookaheads.collect(),
     }
+  }
+
+  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) {
+    self.possible_lookaheads.extend(lookaheads)
   }
 
   fn from_production<I: Iterator<Item = Terminal>>(
@@ -200,8 +203,90 @@ impl<'a> ProductionState {
       .collect()
   }
 
-  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) {
-    self.possible_lookaheads.extend(lookaheads)
+  pub fn is_complete(&self) -> bool {
+    self.pos as usize == self.inst.rules.rules.len()
+  }
+
+  // Returns the next symbol in this production, if there are any symbols left.
+  pub fn next_sym(&self) -> Option<&ProductionRule> {
+    if self.is_complete() {
+      return None;
+    }
+
+    return Some(&self.inst.rules.rules[self.pos as usize]);
+  }
+}
+
+impl From<ProductionState> for PartialProductionState {
+  fn from(prod_state: ProductionState) -> Self {
+    Self {
+      inst: prod_state.inst,
+      pos: prod_state.pos,
+      possible_lookaheads: prod_state.possible_lookaheads,
+    }
+  }
+}
+
+impl Hash for PartialProductionState {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    // Production states are grouped into equivalence classes based only on
+    // their name and position, not lookaheads.
+    self.inst.hash(state);
+    self.pos.hash(state);
+  }
+}
+
+impl PartialEq for PartialProductionState {
+  fn eq(&self, other: &Self) -> bool {
+    self.inst == other.inst && self.pos == other.pos
+  }
+}
+
+impl Eq for PartialProductionState {}
+
+impl PartialOrd for PartialProductionState {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    self
+      .inst
+      .partial_cmp(&other.inst)
+      .and_then(|cmp| Some(cmp.then(self.pos.partial_cmp(&other.pos)?)))
+  }
+}
+
+impl Ord for PartialProductionState {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.inst.cmp(&other.inst).then(self.pos.cmp(&other.pos))
+  }
+}
+
+impl Display for PartialProductionState {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let prod_state: ProductionState = self.clone().into();
+    write!(f, "{}", prod_state)
+  }
+}
+
+/// A production state is an instance of a production and how far through the
+/// production we've parsed so far (represented by a dot).
+///
+/// i.e. `A -> b . C d`
+/// indicates that b has already been parsed, and we're ready to parse C d.
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct ProductionState {
+  inst: ProductionInst,
+  // Ranges from [0, rules.len()], and is the position of the dot.
+  pos: u32,
+  // The list of possible tokens that can follow this rule.
+  possible_lookaheads: BTreeSet<Terminal>,
+}
+
+impl ProductionState {
+  pub fn new<I: Iterator<Item = Terminal>>(inst: ProductionInst, possible_lookaheads: I) -> Self {
+    Self {
+      inst,
+      pos: 0,
+      possible_lookaheads: possible_lookaheads.collect(),
+    }
   }
 
   pub fn is_complete(&self) -> bool {
@@ -226,35 +311,13 @@ impl<'a> ProductionState {
   }
 }
 
-impl Hash for ProductionState {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    // Production states are grouped into equivalence classes based only on
-    // their name and position, not lookaheads.
-    self.inst.hash(state);
-    self.pos.hash(state);
-  }
-}
-
-impl PartialEq for ProductionState {
-  fn eq(&self, other: &Self) -> bool {
-    self.inst == other.inst && self.pos == other.pos
-  }
-}
-
-impl Eq for ProductionState {}
-
-impl PartialOrd for ProductionState {
-  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-    self
-      .inst
-      .partial_cmp(&other.inst)
-      .and_then(|cmp| Some(cmp.then(self.pos.partial_cmp(&other.pos)?)))
-  }
-}
-
-impl Ord for ProductionState {
-  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-    self.inst.cmp(&other.inst).then(self.pos.cmp(&other.pos))
+impl From<PartialProductionState> for ProductionState {
+  fn from(partial_prod_state: PartialProductionState) -> Self {
+    Self {
+      inst: partial_prod_state.inst,
+      pos: partial_prod_state.pos,
+      possible_lookaheads: partial_prod_state.possible_lookaheads,
+    }
   }
 }
 
@@ -354,10 +417,10 @@ impl Closure {
   /// List all derivative states from this one via application of production
   /// rules to nonterminal symbols immediately following "pos".
   fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
-    let mut queue: VecDeque<ProductionState> = VecDeque::new();
-    let mut expanded_rules: HashSet<ProductionState> = HashSet::new();
+    let mut queue: VecDeque<PartialProductionState> = VecDeque::new();
+    let mut expanded_rules: HashSet<PartialProductionState> = HashSet::new();
 
-    queue.extend(states.iter().cloned());
+    queue.extend(states.iter().cloned().map(|state| state.into()));
 
     while let Some(state) = queue.pop_front() {
       if let Some(mut prod_state) = expanded_rules.take(&state) {
@@ -385,24 +448,27 @@ impl Closure {
 
             // If next_terms includes epsilon, the rest of this state is
             // skippable, so include possible_lookaheads.
-            if next_terms.remove(&Terminal::Epsilon(Span::call_site())) {
+            if next_terms.remove(&Terminal::Epsilon(Span::call_site().into())) {
               next_terms.extend(state.possible_lookaheads.clone());
             }
 
             let prod_states =
-              ProductionState::from_production(prod.deref().clone(), next_terms.into_iter());
+              PartialProductionState::from_production(prod.deref().clone(), next_terms.into_iter());
             queue.extend(prod_states);
           }
           _ => {}
         }
       }
     }
-    for prod in &expanded_rules {
-      eprintln!("prod: {}", prod);
-    }
+    // for prod in &expanded_rules {
+    //   eprintln!("prod: {}", prod);
+    // }
 
     return Self {
-      states: expanded_rules.into_iter().collect::<Vec<_>>(),
+      states: expanded_rules
+        .into_iter()
+        .map(|rule| rule.into())
+        .collect::<Vec<_>>(),
     };
   }
 
@@ -410,7 +476,6 @@ impl Closure {
   /// list of production states that each action would yield.
   fn transitions(&self) -> HashMap<Action, Vec<ProductionState>> {
     let mut transitions: HashMap<Action, Vec<ProductionState>> = HashMap::new();
-    eprintln!("{}", self);
 
     for state in &self.states {
       if state.is_complete() {
@@ -436,17 +501,17 @@ impl Closure {
       }
     }
 
-    for (action, prod_states) in &transitions {
-      eprintln!(
-        "transz: {} -> {}",
-        action,
-        prod_states
-          .iter()
-          .map(|state| format!("{}", state))
-          .collect::<Vec<_>>()
-          .join(", ")
-      );
-    }
+    // for (action, prod_states) in &transitions {
+    //   eprintln!(
+    //     "transz: {} -> {}",
+    //     action,
+    //     prod_states
+    //       .iter()
+    //       .map(|state| format!("{}", state))
+    //       .collect::<Vec<_>>()
+    //       .join(", ")
+    //   );
+    // }
 
     transitions
   }
@@ -535,7 +600,7 @@ impl LRTable {
     self.states.insert(lr_state);
 
     let closure = Closure::from_lr_states(prod_states, &mut self.first_table);
-    eprintln!("{}", closure);
+    // eprintln!("{}", closure);
     let transitions = closure.transitions();
     let mut transition_set = TransitionSet::new();
 
@@ -562,7 +627,7 @@ impl LRTable {
       .map(|rule| {
         ProductionState::new(
           ProductionInst::new(&init_state.name, &rule, 0),
-          vec![Terminal::EndOfStream(Span::call_site())].into_iter(),
+          vec![Terminal::EndOfStream(Span::call_site().into())].into_iter(),
         )
       })
       .collect();
@@ -575,8 +640,8 @@ impl LRTable {
 
 impl Display for LRTable {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    for state in self.states.iter() {
-      write!(f, "{}\n", state)?;
+    for (i, state) in self.states.iter().enumerate() {
+      write!(f, "state {}: {}\n", i, state)?;
     }
     Ok(())
   }

@@ -489,12 +489,102 @@ fn main() {
   }
   */
 
-  aug_bnf_impl::aug_bnf! {
-    terminal: char;
+  // aug_bnf_impl::aug_bnf! {
+  //   terminal: char;
 
-    <S> => <A> $;
-    <A> => <A> <B>;
-    <A> => 'a' 'b';
-    <B> => 'a' 'c';
-  };
+  //   <S> => <A> $;
+  //   <A> => <A> <B>;
+  //   <A> => 'a' 'b';
+  //   <B> => 'a' 'c';
+  // };
+
+  // aug_bnf_impl::aug_bnf! {
+  //   terminal: char;
+
+  //   <I> => <S>;
+  //   <S> => 'a' <S> 'x' | 'c' <S> 'z' | <B>;
+  //   <B> => <B> 'b' | !;
+  // }
+
+  aug_bnf_impl::aug_bnf! {
+    terminal: CToken;
+
+    <program> => <declList>;
+    <declList> => <declList> <decl> | <decl>;
+    <decl> => <varDecl> | <funDecl>;
+    <varDecl> => <typeSpec> <varDeclList> ';';
+    <scopedVarDecl> => <static> <typeSpec> <varDeclList> ';' | <typeSpec> <varDeclList> ';';
+    <varDeclList> => <varDeclList> ',' <varDeclInit> | <varDeclInit>;
+    <varDeclInit> => <varDeclId> | <varDeclId> ':' <simpleExp>;
+    <varDeclId> => <ID> | <ID> '[' <NUMCONST> ']';
+    <typeSpec> => <int> | <bool> | <char>;
+    <funDecl> => <typeSpec> <ID> '(' <parms> ')' <stmt> | <ID> '(' <parms> ')' <stmt>;
+    <parms> => <parmList> | !;
+    <parmList> => <parmList> ';' <parmTypeList> | <parmTypeList>;
+    <parmTypeList> => <typeSpec> <parmIdList>;
+    <parmIdList> => <parmIdList> ',' <parmId> | <parmId>;
+    <parmId>=><ID> | <ID> '[' ']';
+    <stmt> => <expStmt> | <compoundStmt> | <selectStmt> | <iterStmt> | <returnStmt> | <breakStmt>;
+    <expStmt> => <exp> ';' | ';';
+    <compoundStmt> => '{' <localDecls> <stmtList> '}';
+    <localDecls> => <localDecls> <scopedVarDecl> | !;
+    <stmtList> => <stmtList> <stmt> | !;
+    <selectStmt> => <if> <simpleExp> <then> <stmt> | <if> <simpleExp> <then> <stmt> <else> <stmt>;
+    <iterStmt> => <while> <simpleExp> <do> <stmt> | <for> <ID> '=' <iterRange> <do> <stmt>;
+    <iterRange> => <simpleExp> <to> <simpleExp> | <simpleExp> <to> <simpleExp> <by> <simpleExp>;
+    <returnStmt> => <return> ';' | <return> <exp> ';';
+    <breakStmt> => <break> ';';
+    <exp> => <mutable> '=' <exp>
+           | <mutable> '+' '=' <exp>
+           | <mutable> '-' '=' <exp>
+           | <mutable> '*' '=' <exp>
+           | <mutable> '/' '=' <exp>
+           | <mutable> '+' '+'
+           | <mutable> '-' '-'
+           | <simpleExp>;
+    <simpleExp> => <simpleExp> <or> <andExp> | <andExp>;
+    <andExp> => <andExp> <and> <unaryRelExp> | <unaryRelExp>;
+    <unaryRelExp> => <not> <unaryRelExp> | <relExp>;
+    <relExp> => <minmaxExp> <relop> <minmaxExp> | <minmaxExp>;
+    <relop> => '<' '=' | '<' | '>' | '>' '=' | '=' '=' | '!' '=';
+    <minmaxExp> => <minmaxExp> <minmaxop> <sumExp> | <sumExp>;
+    <minmaxop> => ':' '>' ':' | ':' '<' ':';
+    <sumExp> => <sumExp> <sumop> <mulExp> | <mulExp>;
+    <sumop>=> '+' | '-';
+    <mulExp> => <mulExp> <mulop> <unaryExp> | <unaryExp>;
+    <mulop> => '*' | '/' | '%';
+    <unaryExp> => <unaryop> <unaryExp> | <factor>;
+    <unaryop> => '-' | '*' | '?';
+    <factor> => <immutable> | <mutable>;
+    <mutable> => <ID> | <ID> '[' <exp> ']';
+    <immutable> => '(' <exp> ')' | <call> | <constant>;
+    <call>=> <ID> '(' <args> ')';
+    <args> => <argList> | !;
+    <argList> => <argList> ',' <exp> | <exp>;
+    <constant> => <NUMCONST> | <CHARCONST> | <STRINGCONST> | <true> | <false>;
+
+    <return> => 'a';
+    <or> => '|';
+    <and> => '&';
+    <not> => '!';
+    <ID> => 'x';
+    <NUMCONST> => '1';
+    <CHARCONST> => '\'';
+    <if> => 'i';
+    <else> => 'e';
+    <for> => 'f';
+    <while> => 'w';
+    <do> => 'd';
+    <break> => 'r';
+    <then> => 't';
+    <to> => '2';
+    <by> => 'b';
+    <static> => 's';
+    <int> => '0';
+    <bool> => '3';
+    <char> => '4';
+    <STRINGCONST> => '5';
+    <true> => 'y';
+    <false> => 'z';
+  }
 }

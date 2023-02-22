@@ -348,7 +348,8 @@ impl Display for ProductionState {
 
 enum Action {
   Shift(Terminal),
-  Reduce(Weak<Production>),
+  Reduce(Terminal),
+  Goto(Weak<Production>),
 }
 
 impl Hash for Action {
@@ -358,8 +359,12 @@ impl Hash for Action {
         state.write_u64(0);
         terminal.hash(state);
       }
-      Action::Reduce(production_ptr) => {
+      Action::Reduce(terminal) => {
         state.write_u64(1);
+        terminal.hash(state);
+      }
+      Action::Goto(production_ptr) => {
+        state.write_u64(2);
         production_ptr.upgrade().unwrap().name.hash(state);
       }
     };
@@ -370,7 +375,8 @@ impl PartialEq for Action {
   fn eq(&self, other: &Self) -> bool {
     match (self, other) {
       (Action::Shift(terminal1), Action::Shift(terminal2)) => terminal1 == terminal2,
-      (Action::Reduce(production_ptr1), Action::Reduce(production_ptr2)) => {
+      (Action::Reduce(terminal1), Action::Reduce(terminal2)) => terminal1 == terminal2,
+      (Action::Goto(production_ptr1), Action::Goto(production_ptr2)) => {
         production_ptr1.upgrade().unwrap().name == production_ptr2.upgrade().unwrap().name
       }
       _ => false,
@@ -383,24 +389,24 @@ impl Eq for Action {}
 impl Display for Action {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
-      Action::Reduce(production_ptr) => {
-        write!(
-          f,
-          "reduce({})",
-          production_ptr.upgrade().unwrap().name.name()
-        )
-      }
       Action::Shift(terminal) => {
         write!(f, "shift({})", terminal)
+      }
+      Action::Reduce(terminal) => {
+        write!(f, "reduce({})", terminal)
+      }
+      Action::Goto(production_ptr) => {
+        write!(f, "goto({})", production_ptr.upgrade().unwrap().name.name())
       }
     }
   }
 }
 
-// struct Transition {
-//   action: Action,
-//   next_state: ProductionState,
-// }
+enum Transition {
+  Shift(Terminal),
+  // action: Action,
+  // next_state: ProductionState,
+}
 
 type TransitionSet = HashMap<Action, Rc<LRState>>;
 
@@ -478,14 +484,13 @@ impl Closure {
 
     for state in &self.states {
       if state.is_complete() {
-        // Completed states don't have any transitions.
+        // Completed states can be reduced.
+
         continue;
       }
 
       let action = match state.next_sym() {
-        Some(ProductionRule::Intermediate(intermediate)) => {
-          Action::Reduce(intermediate.deref_weak())
-        }
+        Some(ProductionRule::Intermediate(intermediate)) => Action::Goto(intermediate.deref_weak()),
         Some(ProductionRule::Terminal(term)) => Action::Shift(term.clone()),
         None => unreachable!(),
       };
@@ -500,17 +505,17 @@ impl Closure {
       }
     }
 
-    // for (action, prod_states) in &transitions {
-    //   eprintln!(
-    //     "transz: {} -> {}",
-    //     action,
-    //     prod_states
-    //       .iter()
-    //       .map(|state| format!("{}", state))
-    //       .collect::<Vec<_>>()
-    //       .join(", ")
-    //   );
-    // }
+    for (action, prod_states) in &transitions {
+      eprintln!(
+        "\t\ttransz: {} -> {}",
+        action,
+        prod_states
+          .iter()
+          .map(|state| format!("{}", state))
+          .collect::<Vec<_>>()
+          .join(", ")
+      );
+    }
 
     transitions
   }
@@ -594,12 +599,13 @@ impl LRTable {
     if let Some(lr_state) = self.states.get(&lr_state) {
       return lr_state.clone();
     }
+    eprintln!("{}", lr_state);
 
     let lr_state = Rc::new(lr_state);
     self.states.insert(lr_state);
 
     let closure = Closure::from_lr_states(prod_states, &mut self.first_table);
-    // eprintln!("{}", closure);
+    eprintln!("\t{}", closure);
     let transitions = closure.transitions();
     let mut transition_set = TransitionSet::new();
 

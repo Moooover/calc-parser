@@ -5,6 +5,7 @@ mod code_gen;
 mod lr_table;
 mod production;
 mod symbol;
+mod util;
 
 use lr_table::LRTable;
 use proc_macro::TokenStream;
@@ -19,7 +20,7 @@ pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let list = Symbol::from_stream(tokens);
   let grammar = Grammar::from(list);
   let s = format!("{}", grammar);
-  let lr_table = LRTable::from_grammar(&grammar);
+  let lr_table = LRTable::from_grammar(&grammar).unwrap_or_else(|err| err.raise());
   let l = format!("{}", lr_table);
   // let syn_tree = code_gen::to_match_loop(&lr_table);
   // return syn_tree.into();

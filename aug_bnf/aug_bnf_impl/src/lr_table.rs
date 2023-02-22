@@ -1,13 +1,16 @@
 use proc_macro::Span;
+use proc_macro_error::abort;
+use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use crate::production::{
-  Grammar, Production, ProductionName, ProductionRule, ProductionRules, Terminal,
+  Grammar, Production, ProductionRef, ProductionRule, ProductionRules, Terminal,
 };
+use crate::util::{ParseError, ParseResult};
 
 enum FirstCacheState {
   Hit(HashSet<Terminal>),
@@ -17,12 +20,12 @@ enum FirstCacheState {
 
 /// A cache of the sets of possible first elements seen in a production rule,
 /// given the production's name.
-type ProductionFirstTable = HashMap<ProductionName, FirstCacheState>;
+type ProductionFirstTable = HashMap<ProductionRef, FirstCacheState>;
 
 #[derive(Clone)]
 struct ProductionInst {
   // The name of the production, i.e. the LHS of A -> b C d ...
-  name: ProductionName,
+  prod_ref: ProductionRef,
   // The rules that make up this production, i.e. the RHS.
   rules: ProductionRules,
   // The index of this rule in the list of possible expansions of a rule. Used
@@ -31,21 +34,21 @@ struct ProductionInst {
 }
 
 impl ProductionInst {
-  pub fn new(name: &ProductionName, rules: &ProductionRules, rule_idx: u32) -> Self {
+  pub fn new(name: &ProductionRef, rules: &ProductionRules, rule_idx: u32) -> Self {
     Self {
-      name: name.clone(),
+      prod_ref: name.clone(),
       rules: rules.clone(),
       rule_idx,
     }
   }
 
-  pub fn from_production(production: &Production) -> Vec<Self> {
+  pub fn from_production(production: &Rc<Production>) -> Vec<Self> {
     production
       .rules
       .iter()
       .enumerate()
       .map(|(idx, rules)| Self {
-        name: production.name.clone(),
+        prod_ref: ProductionRef::new(Rc::downgrade(&production)),
         rules: rules.clone(),
         rule_idx: idx as u32,
       })
@@ -61,7 +64,7 @@ impl ProductionInst {
     first_cache: &mut ProductionFirstTable,
   ) -> HashSet<Terminal> {
     if pos == 0 {
-      match first_cache.get(&self.name) {
+      match first_cache.get(&self.prod_ref) {
         Some(FirstCacheState::Hit(terms)) => {
           return terms.clone();
         }
@@ -73,7 +76,7 @@ impl ProductionInst {
         }
         None => {
           // Set the cache state to pending.
-          first_cache.insert(self.name.clone(), FirstCacheState::Pending);
+          first_cache.insert(self.prod_ref.clone(), FirstCacheState::Pending);
         }
       }
     }
@@ -83,9 +86,8 @@ impl ProductionInst {
 
     match self.rules.rule_at(pos) {
       Some(ProductionRule::Intermediate(production_ref)) => {
-        let prod_ptr = production_ref.deref();
-        let production: &Production = prod_ptr.deref();
-        let prod_insts = Self::from_production(production);
+        let production = production_ref.deref();
+        let prod_insts = Self::from_production(&production);
         terms.extend(prod_insts.iter().fold(HashSet::new(), |mut terms, inst| {
           terms.extend(inst.calculate_first_set(0, first_cache));
           terms
@@ -106,10 +108,10 @@ impl ProductionInst {
     // (i.e. pos == 0).
     if pos == 0 {
       // Insert into the cache if it doesn't already exist.
-      if let Some(state) = first_cache.get(&self.name) {
+      if let Some(state) = first_cache.get(&self.prod_ref) {
         match &state {
           FirstCacheState::Pending => {
-            first_cache.insert(self.name.clone(), FirstCacheState::Hit(terms.clone()));
+            first_cache.insert(self.prod_ref.clone(), FirstCacheState::Hit(terms.clone()));
           }
           _ => {}
         }
@@ -134,14 +136,14 @@ impl ProductionInst {
 
 impl Hash for ProductionInst {
   fn hash<H: Hasher>(&self, state: &mut H) {
-    self.name.hash(state);
+    self.prod_ref.hash(state);
     self.rule_idx.hash(state);
   }
 }
 
 impl PartialEq for ProductionInst {
   fn eq(&self, other: &Self) -> bool {
-    self.name == other.name && self.rule_idx == other.rule_idx
+    self.prod_ref == other.prod_ref && self.rule_idx == other.rule_idx
   }
 }
 
@@ -150,8 +152,8 @@ impl Eq for ProductionInst {}
 impl PartialOrd for ProductionInst {
   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
     self
-      .name
-      .partial_cmp(&other.name)
+      .prod_ref
+      .partial_cmp(&other.prod_ref)
       .and_then(|cmp| Some(cmp.then(self.rule_idx.partial_cmp(&other.rule_idx)?)))
   }
 }
@@ -159,8 +161,8 @@ impl PartialOrd for ProductionInst {
 impl Ord for ProductionInst {
   fn cmp(&self, other: &Self) -> std::cmp::Ordering {
     self
-      .name
-      .cmp(&other.name)
+      .prod_ref
+      .cmp(&other.prod_ref)
       .then(self.rule_idx.cmp(&other.rule_idx))
   }
 }
@@ -192,11 +194,11 @@ impl<'a> PartialProductionState {
   }
 
   fn from_production<I: Iterator<Item = Terminal>>(
-    production: &Production,
+    prod_ptr: &Rc<Production>,
     possible_lookaheads: I,
   ) -> Vec<Self> {
     let lookaheads = possible_lookaheads.collect::<Vec<_>>();
-    ProductionInst::from_production(production)
+    ProductionInst::from_production(prod_ptr)
       .into_iter()
       .map(|inst| Self::new(inst, lookaheads.clone().into_iter()))
       .collect()
@@ -334,7 +336,7 @@ impl Display for ProductionState {
     write!(
       f,
       "[<{}> => {}, {}]",
-      self.inst.name.name(),
+      self.inst.prod_ref.name(),
       rule_strs.join(" "),
       &self
         .possible_lookaheads
@@ -346,69 +348,176 @@ impl Display for ProductionState {
   }
 }
 
-enum Action {
-  Shift(Terminal),
-  Reduce(Terminal),
-  Goto(Weak<Production>),
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct LRStateBuilder {
+  states: BTreeSet<ProductionState>,
 }
 
-impl Hash for Action {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    match self {
-      Action::Shift(terminal) => {
-        state.write_u64(0);
-        terminal.hash(state);
-      }
-      Action::Reduce(terminal) => {
-        state.write_u64(1);
-        terminal.hash(state);
-      }
-      Action::Goto(production_ptr) => {
-        state.write_u64(2);
-        production_ptr.upgrade().unwrap().name.hash(state);
-      }
-    };
-  }
-}
-
-impl PartialEq for Action {
-  fn eq(&self, other: &Self) -> bool {
-    match (self, other) {
-      (Action::Shift(terminal1), Action::Shift(terminal2)) => terminal1 == terminal2,
-      (Action::Reduce(terminal1), Action::Reduce(terminal2)) => terminal1 == terminal2,
-      (Action::Goto(production_ptr1), Action::Goto(production_ptr2)) => {
-        production_ptr1.upgrade().unwrap().name == production_ptr2.upgrade().unwrap().name
-      }
-      _ => false,
+impl LRStateBuilder {
+  fn new() -> Self {
+    Self {
+      states: BTreeSet::new(),
     }
   }
+
+  fn insert(&mut self, state: ProductionState) -> bool {
+    self.states.insert(state)
+  }
 }
 
-impl Eq for Action {}
+impl Display for LRStateBuilder {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    for (i, state) in self.states.iter().enumerate() {
+      if i != 0 {
+        write!(f, ", ")?;
+      }
+      write!(f, "{}", state)?;
+    }
+    Ok(())
+  }
+}
 
-impl Display for Action {
+#[derive(PartialEq, Eq)]
+enum ActionBuilder {
+  Shift(LRStateBuilder),
+  Reduce(ProductionRef),
+}
+
+impl Display for ActionBuilder {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
-      Action::Shift(terminal) => {
-        write!(f, "shift({})", terminal)
+      ActionBuilder::Shift(prod_states) => {
+        write!(
+          f,
+          "shift({})",
+          prod_states
+            .states
+            .iter()
+            .map(|prod_state| prod_state.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+        )
       }
-      Action::Reduce(terminal) => {
-        write!(f, "reduce({})", terminal)
-      }
-      Action::Goto(production_ptr) => {
-        write!(f, "goto({})", production_ptr.upgrade().unwrap().name.name())
+      ActionBuilder::Reduce(prod_ref) => {
+        write!(f, "reduce({})", prod_ref)
       }
     }
   }
 }
 
-enum Transition {
-  Shift(Terminal),
-  // action: Action,
-  // next_state: ProductionState,
+// type TransitionSet = HashMap<Action, Rc<LRState>>;
+struct TransitionSetBuilder {
+  action_map: HashMap<Terminal, ActionBuilder>,
+  goto_map: HashMap<ProductionRef, LRStateBuilder>,
 }
 
-type TransitionSet = HashMap<Action, Rc<LRState>>;
+impl TransitionSetBuilder {
+  fn new() -> Self {
+    Self {
+      action_map: HashMap::new(),
+      goto_map: HashMap::new(),
+    }
+  }
+
+  fn insert_shift(&mut self, term: Terminal, prod_state: ProductionState) -> ParseResult {
+    match self.action_map.get_mut(&term) {
+      Some(ActionBuilder::Shift(lr_state)) => {
+        lr_state.insert(prod_state);
+        Ok(())
+      }
+      Some(ActionBuilder::Reduce(prod_ref)) => ParseError::new(
+        &format!(
+          "Shift/reduce conflict for rules {} (shift) and {} (reduce)",
+          prod_state.inst.prod_ref, prod_ref
+        ),
+        prod_state.inst.prod_ref.span(),
+      )
+      .into(),
+      None => {
+        let mut lr_state = LRStateBuilder::new();
+        lr_state.insert(prod_state);
+        self.action_map.insert(term, ActionBuilder::Shift(lr_state));
+        Ok(())
+      }
+    }
+  }
+
+  fn insert_reduce(&mut self, term: Terminal, prod_ref: ProductionRef) -> ParseResult {
+    match self.action_map.get_mut(&term) {
+      Some(action @ ActionBuilder::Shift(_)) => ParseError::new(
+        &format!(
+          "Shift/reduce conflict for rules {} (shift) and {} (reduce)",
+          action, prod_ref.production
+        ),
+        prod_ref.span(),
+      )
+      .into(),
+      Some(ActionBuilder::Reduce(other_prod_ref)) => ParseError::new(
+        &format!(
+          "Reduce/reduce conflict for rules {} and {}",
+          prod_ref.production, other_prod_ref.production
+        ),
+        prod_ref.span(),
+      )
+      .into(),
+      None => {
+        self
+          .action_map
+          .insert(term, ActionBuilder::Reduce(prod_ref));
+        Ok(())
+      }
+    }
+  }
+
+  fn insert_goto(&mut self, prod_ref: ProductionRef, prod_state: ProductionState) -> ParseResult {
+    match self.goto_map.get_mut(&prod_ref) {
+      Some(lr_state) => {
+        lr_state.insert(prod_state);
+        Ok(())
+      }
+      None => {
+        let mut lr_state = LRStateBuilder::new();
+        lr_state.insert(prod_state);
+        self.goto_map.insert(prod_ref, lr_state);
+        Ok(())
+      }
+    }
+  }
+}
+
+impl Display for TransitionSetBuilder {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let mut was_prev = false;
+    for (term, action) in &self.action_map {
+      if !was_prev {
+        write!(f, "\n");
+      } else {
+        was_prev = true;
+      }
+      write!(f, "{} => {}", term, action)?;
+    }
+    for (prod_ref, prod_refs) in &self.goto_map {
+      if !was_prev {
+        write!(f, "\n");
+      } else {
+        was_prev = true;
+      }
+      write!(
+        f,
+        "{} => {}",
+        prod_ref,
+        prod_refs
+          .states
+          .iter()
+          .map(|prod_ref| prod_ref.to_string())
+          .collect::<Vec<_>>()
+          .join(", ")
+      )?;
+    }
+
+    Ok(())
+  }
+}
 
 /// A state in the parsing DFA, which contains the set of all possible
 /// productions that we could currently be parsing. Note that these rules must
@@ -421,11 +530,20 @@ struct Closure {
 impl Closure {
   /// List all derivative states from this one via application of production
   /// rules to nonterminal symbols immediately following "pos".
-  fn from_lr_states(states: &Vec<ProductionState>, first_cache: &mut ProductionFirstTable) -> Self {
+  fn from_lr_states(
+    lr_state_builder: &LRStateBuilder,
+    first_cache: &mut ProductionFirstTable,
+  ) -> Self {
     let mut queue: VecDeque<PartialProductionState> = VecDeque::new();
     let mut expanded_rules: HashSet<PartialProductionState> = HashSet::new();
 
-    queue.extend(states.iter().cloned().map(|state| state.into()));
+    queue.extend(
+      lr_state_builder
+        .states
+        .iter()
+        .cloned()
+        .map(|state| state.into()),
+    );
 
     while let Some(state) = queue.pop_front() {
       if let Some(mut prod_state) = expanded_rules.take(&state) {
@@ -458,7 +576,7 @@ impl Closure {
             }
 
             let prod_states =
-              PartialProductionState::from_production(prod.deref().clone(), next_terms.into_iter());
+              PartialProductionState::from_production(&prod, next_terms.into_iter());
             queue.extend(prod_states);
           }
           _ => {}
@@ -479,45 +597,33 @@ impl Closure {
 
   /// Computes the set of actions that can be taken from this state, and the
   /// list of production states that each action would yield.
-  fn transitions(&self) -> HashMap<Action, Vec<ProductionState>> {
-    let mut transitions: HashMap<Action, Vec<ProductionState>> = HashMap::new();
+  fn transitions(&self) -> ParseResult<TransitionSetBuilder> {
+    let mut transitions = TransitionSetBuilder::new();
 
     for state in &self.states {
       if state.is_complete() {
         // Completed states can be reduced.
+        for term in &state.possible_lookaheads {
+          transitions.insert_reduce(term.clone(), state.inst.prod_ref.clone())?;
+        }
 
         continue;
       }
 
-      let action = match state.next_sym() {
-        Some(ProductionRule::Intermediate(intermediate)) => Action::Goto(intermediate.deref_weak()),
-        Some(ProductionRule::Terminal(term)) => Action::Shift(term.clone()),
+      match state.next_sym() {
+        Some(ProductionRule::Intermediate(intermediate)) => {
+          transitions.insert_goto(intermediate.clone(), state.clone())?;
+        }
+        Some(ProductionRule::Terminal(term)) => {
+          transitions.insert_shift(term.clone(), state.clone())?;
+        }
         None => unreachable!(),
-      };
-
-      match transitions.get_mut(&action) {
-        Some(lr_state) => {
-          lr_state.push(state.advance());
-        }
-        None => {
-          transitions.insert(action, vec![state.advance()]);
-        }
       }
     }
 
-    for (action, prod_states) in &transitions {
-      eprintln!(
-        "\t\ttransz: {} -> {}",
-        action,
-        prod_states
-          .iter()
-          .map(|state| format!("{}", state))
-          .collect::<Vec<_>>()
-          .join(", ")
-      );
-    }
+    eprintln!("{}", transitions);
 
-    transitions
+    Ok(transitions)
   }
 }
 
@@ -533,21 +639,63 @@ impl Display for Closure {
   }
 }
 
+#[derive(Hash, PartialEq, Eq)]
+enum LRTableEntry {
+  Resolved(LRState),
+  Unresolved(LRStateBuilder),
+}
+
+impl Borrow<LRStateBuilder> for Rc<LRTableEntry> {
+  fn borrow(&self) -> &LRStateBuilder {
+    match self.deref() {
+      LRTableEntry::Resolved(lr_state) => &lr_state.states,
+      LRTableEntry::Unresolved(lr_state_builder) => &lr_state_builder,
+    }
+  }
+}
+
+impl Display for LRTableEntry {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    match self {
+      LRTableEntry::Resolved(lr_state) => write!(f, "resolved({})", lr_state),
+      LRTableEntry::Unresolved(lr_state_builder) => write!(f, "unresolved({})", lr_state_builder),
+    }
+  }
+}
+
+#[derive(PartialEq, Eq)]
+enum Action {
+  Shift(Rc<LRTableEntry>),
+  Reduce(ProductionRef),
+}
+
+struct TransitionSet {
+  action_map: HashMap<Terminal, Action>,
+  goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
+}
+
+impl TransitionSet {
+  fn new() -> Self {
+    Self {
+      action_map: HashMap::new(),
+      goto_map: HashMap::new(),
+    }
+  }
+}
+
 struct LRState {
-  states: BTreeSet<ProductionState>,
-  transitions: Option<TransitionSet>,
+  states: LRStateBuilder,
+  transitions: TransitionSet,
 }
 
 impl LRState {
-  pub fn new<I: Iterator<Item = ProductionState>>(states: I) -> Self {
+  pub fn new<I: Iterator<Item = ProductionState>>(states: I, transitions: TransitionSet) -> Self {
     Self {
-      states: states.collect(),
-      transitions: None,
+      states: LRStateBuilder {
+        states: states.collect(),
+      },
+      transitions,
     }
-  }
-
-  fn set_transitions(&mut self, transitions: TransitionSet) {
-    self.transitions = Some(transitions);
   }
 }
 
@@ -569,77 +717,103 @@ impl Eq for LRState {}
 
 impl Display for LRState {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    for (i, state) in self.states.iter().enumerate() {
-      if i != 0 {
-        write!(f, ", ")?;
-      }
-      write!(f, "{}", state)?;
-    }
-    Ok(())
+    write!(f, "{}", self.states)
   }
 }
 
 pub struct LRTable {
-  states: HashSet<Rc<LRState>>,
+  states: HashSet<Rc<LRTableEntry>>,
   first_table: ProductionFirstTable,
-  initial_state: Option<Rc<LRState>>,
+  initial_state: Rc<LRTableEntry>,
 }
 
 impl LRTable {
-  pub fn new() -> Self {
-    LRTable {
-      states: HashSet::new(),
-      first_table: HashMap::new(),
-      initial_state: None,
+  fn calculate_transitions(
+    states: &mut HashSet<Rc<LRTableEntry>>,
+    first_table: &mut ProductionFirstTable,
+    lr_state_builder: &LRStateBuilder,
+  ) -> ParseResult<Rc<LRTableEntry>> {
+    if let Some(prior_lr_state) = states.get(lr_state_builder) {
+      // TODO need to meld all possible_lookaheads in lr_state into prior_lr_state
+      return Ok(prior_lr_state.clone());
     }
-  }
+    eprintln!("{}", lr_state_builder);
 
-  fn calculate_transitions(&mut self, prod_states: &Vec<ProductionState>) -> Rc<LRState> {
-    let lr_state = LRState::new(prod_states.clone().into_iter());
-    if let Some(lr_state) = self.states.get(&lr_state) {
-      return lr_state.clone();
-    }
-    eprintln!("{}", lr_state);
+    let lr_state = Rc::new(LRTableEntry::Unresolved(lr_state_builder.clone()));
+    states.insert(lr_state.clone());
 
-    let lr_state = Rc::new(lr_state);
-    self.states.insert(lr_state);
-
-    let closure = Closure::from_lr_states(prod_states, &mut self.first_table);
+    let closure = Closure::from_lr_states(lr_state_builder, first_table);
     eprintln!("\t{}", closure);
-    let transitions = closure.transitions();
+    let transitions = closure.transitions()?;
+
     let mut transition_set = TransitionSet::new();
 
-    for (action, prod_states) in transitions.into_iter() {
-      let child_lr_state = self.calculate_transitions(&prod_states);
-      transition_set.insert(action, child_lr_state);
+    for (term, action_builder) in transitions.action_map {
+      match action_builder {
+        ActionBuilder::Reduce(prod_ref) => {
+          transition_set
+            .action_map
+            .insert(term.clone(), Action::Reduce(prod_ref));
+        }
+        ActionBuilder::Shift(lr_state_builder) => {
+          let child_lr_state = Self::calculate_transitions(states, first_table, &lr_state_builder)?;
+          transition_set
+            .action_map
+            .insert(term.clone(), Action::Shift(child_lr_state));
+        }
+      }
     }
 
-    // TODO mutate this in place with RefCell.
-    let mut lr_state = LRState::new(prod_states.clone().into_iter());
-    lr_state.set_transitions(transition_set);
-    let lr_state = Rc::new(lr_state);
-    return lr_state;
+    for (prod_ref, lr_state_builder) in transitions.goto_map {
+      let child_lr_state = Self::calculate_transitions(states, first_table, &lr_state_builder)?;
+      transition_set.goto_map.insert(prod_ref, child_lr_state);
+    }
+
+    let mut lr_state = states.take(&lr_state).unwrap();
+    if let LRTableEntry::Unresolved(lr_state_builder) = lr_state.deref() {
+      unsafe {
+        *Rc::get_mut_unchecked(&mut lr_state) = LRTableEntry::Resolved(LRState::new(
+          lr_state_builder.states.clone().into_iter(),
+          transition_set,
+        ));
+      }
+      states.insert(lr_state.clone());
+    } else {
+      abort!(Span::call_site(), "Unexpected resolved LR table entry");
+    }
+    return Ok(lr_state);
   }
 
-  pub fn from_grammar(grammar: &Grammar) -> Self {
-    let mut table = LRTable::new();
-
+  pub fn from_grammar(grammar: &Grammar) -> ParseResult<Self> {
     let init_state_ptr = grammar.starting_rule();
-    let init_state = init_state_ptr.deref();
-    let initial_lr_state = init_state
-      .rules()
-      .iter()
-      .map(|rule| {
-        ProductionState::new(
-          ProductionInst::new(&init_state.name, &rule, 0),
-          vec![Terminal::EndOfStream(Span::call_site().into())].into_iter(),
-        )
-      })
-      .collect();
-    let initial_state = table.calculate_transitions(&initial_lr_state);
-    table.initial_state = Some(initial_state);
 
-    return table;
+    let mut initial_lr_state = LRStateBuilder::new();
+    init_state_ptr.rules().iter().for_each(|rule| {
+      initial_lr_state.insert(ProductionState::new(
+        ProductionInst::new(
+          &ProductionRef::new(Rc::downgrade(&init_state_ptr)),
+          &rule,
+          0,
+        ),
+        vec![Terminal::EndOfStream(Span::call_site().into())].into_iter(),
+      ));
+    });
+
+    let mut states = HashSet::new();
+    let mut first_table = ProductionFirstTable::new();
+
+    let initial_state = Rc::new(LRTableEntry::Resolved(LRState::new(
+      vec![].into_iter(),
+      TransitionSet::new(),
+    )));
+    // let initial_state =
+    //   Self::calculate_transitions(&mut states, &mut first_table, &initial_lr_state)?;
+
+    Ok(Self {
+      states,
+      first_table,
+      initial_state,
+    })
   }
 }
 

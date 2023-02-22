@@ -7,33 +7,7 @@ use std::iter::Peekable;
 use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
-
-#[derive(Debug)]
-pub struct ParseError {
-  message: String,
-  span: Span,
-}
-
-impl ParseError {
-  pub fn new(message: &str, span: Span) -> Self {
-    Self {
-      message: String::from(message),
-      span,
-    }
-  }
-
-  pub fn raise(&self) -> ! {
-    abort!(self.span, self.message);
-  }
-}
-
-impl<T> From<ParseError> for ParseResult<T> {
-  fn from(parse_err: ParseError) -> ParseResult<T> {
-    Err(parse_err)
-  }
-}
-
-pub type ParseResult<T> = Result<T, ParseError>;
+use crate::util::{ParseError, ParseResult};
 
 macro_rules! span_join {
   ($s1:expr) => {
@@ -413,6 +387,10 @@ impl ProductionName {
     &self.name
   }
 
+  pub fn span(&self) -> Span {
+    self.span
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(
     iter: &mut Peekable<T>,
     state: &mut ParserState,
@@ -517,10 +495,30 @@ impl Display for ProductionRefT {
 pub struct ProductionRef {
   pub production: ProductionRefT,
   pub alias: Option<String>,
-  pub span: Span,
+  span: Span,
 }
 
 impl ProductionRef {
+  // Creates a production ref from a production.
+  pub fn new(prod_ptr: Weak<Production>) -> Self {
+    Self {
+      production: ProductionRefT::Resolved(prod_ptr),
+      alias: None,
+      span: Span::call_site(),
+    }
+  }
+
+  pub fn span(&self) -> Span {
+    self.span
+  }
+
+  pub fn name(&self) -> String {
+    match &self.production {
+      ProductionRefT::Resolved(prod_ptr) => prod_ptr.upgrade().unwrap().name.name().to_string(),
+      ProductionRefT::Unresolved(name) => name.to_string(),
+    }
+  }
+
   pub fn deref(&self) -> Rc<Production> {
     match &self.production {
       ProductionRefT::Resolved(resolved) => resolved.upgrade().unwrap().clone(),
@@ -608,6 +606,77 @@ impl ProductionRef {
         })
       }
       _ => ParseError::new("Expected '>' or ':'.", colon_or_end.span).into(),
+    }
+  }
+}
+
+impl Hash for ProductionRef {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    match &self.production {
+      ProductionRefT::Resolved(prod) => {
+        state.write_u64(0);
+        prod.upgrade().unwrap().hash(state);
+      }
+      ProductionRefT::Unresolved(name) => {
+        state.write_u64(1);
+        name.hash(state);
+      }
+    }
+  }
+}
+
+impl PartialEq for ProductionRef {
+  fn eq(&self, other: &Self) -> bool {
+    match (&self.production, &other.production) {
+      (ProductionRefT::Resolved(prod1), ProductionRefT::Resolved(prod2)) => {
+        prod1.upgrade().unwrap() == prod2.upgrade().unwrap()
+      }
+      (ProductionRefT::Unresolved(name1), ProductionRefT::Unresolved(name2)) => name1 == name2,
+      _ => false,
+    }
+  }
+}
+
+impl Eq for ProductionRef {}
+
+impl PartialOrd for ProductionRef {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    match (&self.production, &other.production) {
+      (ProductionRefT::Resolved(prod_ptr1), ProductionRefT::Resolved(prod_ptr2)) => prod_ptr1
+        .upgrade()
+        .unwrap()
+        .name
+        .partial_cmp(&prod_ptr2.upgrade().unwrap().name),
+      (ProductionRefT::Resolved(_prod_ptr1), ProductionRefT::Unresolved(_prod_name2)) => {
+        Some(std::cmp::Ordering::Greater)
+      }
+      (ProductionRefT::Unresolved(_prod_name1), ProductionRefT::Resolved(_prod_ptr2)) => {
+        Some(std::cmp::Ordering::Less)
+      }
+      (ProductionRefT::Unresolved(prod_name1), ProductionRefT::Unresolved(prod_name2)) => {
+        prod_name1.partial_cmp(&prod_name2)
+      }
+    }
+  }
+}
+
+impl Ord for ProductionRef {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    match (&self.production, &other.production) {
+      (ProductionRefT::Resolved(prod_ptr1), ProductionRefT::Resolved(prod_ptr2)) => prod_ptr1
+        .upgrade()
+        .unwrap()
+        .name
+        .cmp(&prod_ptr2.upgrade().unwrap().name),
+      (ProductionRefT::Resolved(_prod_ptr1), ProductionRefT::Unresolved(_prod_name2)) => {
+        std::cmp::Ordering::Greater
+      }
+      (ProductionRefT::Unresolved(_prod_name1), ProductionRefT::Resolved(_prod_ptr2)) => {
+        std::cmp::Ordering::Less
+      }
+      (ProductionRefT::Unresolved(prod_name1), ProductionRefT::Unresolved(prod_name2)) => {
+        prod_name1.cmp(&prod_name2)
+      }
     }
   }
 }
@@ -809,6 +878,20 @@ impl Production {
     })
   }
 }
+
+impl Hash for Production {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.name.hash(state);
+  }
+}
+
+impl PartialEq for Production {
+  fn eq(&self, other: &Self) -> bool {
+    self.name == other.name
+  }
+}
+
+impl Eq for Production {}
 
 impl Display for Production {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {

@@ -250,7 +250,7 @@ impl ProductionState {
     self.pos == self.inst.rule_ref.rules().len()
   }
 
-  // Returns the next symbol in this production, if there are any symbols left.
+  /// Returns the next symbol in this production, if there are any symbols left.
   pub fn next_sym(&self) -> Option<&ProductionRule> {
     if self.is_complete() {
       return None;
@@ -259,8 +259,9 @@ impl ProductionState {
     return self.inst.rule_ref.rules().rule_at(self.pos);
   }
 
+  /// Advances the production state to the next token.
   pub fn advance(&self) -> Self {
-    debug_assert!(self.pos + 1 < self.inst.rule_ref.rules().len());
+    debug_assert!(!self.is_complete());
     Self {
       pos: self.pos + 1,
       ..self.clone()

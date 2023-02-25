@@ -7,8 +7,9 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
+use crate::lr_table;
 use crate::production::{
-  Grammar, Production, ProductionRef, ProductionRule, ProductionRules, Terminal,
+  Grammar, Production, ProductionRef, ProductionRule, ProductionRuleRef, ProductionRules, Terminal,
 };
 use crate::util::{ParseError, ParseResult};
 
@@ -20,26 +21,17 @@ enum FirstCacheState {
 
 /// A cache of the sets of possible first elements seen in a production rule,
 /// given the production's name.
-type ProductionFirstTable = HashMap<ProductionRef, FirstCacheState>;
+type ProductionFirstTable = HashMap<ProductionRuleRef, FirstCacheState>;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct ProductionInst {
-  // The name of the production, i.e. the LHS of A -> b C d ...
-  prod_ref: ProductionRef,
-  // The rules that make up this production, i.e. the RHS.
-  rules: ProductionRules,
-  // The index of this rule in the list of possible expansions of a rule. Used
-  // only to uniquely identify rule instances.
-  rule_idx: u32,
+  // A reference to a particular instance of a rule.
+  rule_ref: ProductionRuleRef,
 }
 
 impl ProductionInst {
-  pub fn new(name: &ProductionRef, rules: &ProductionRules, rule_idx: u32) -> Self {
-    Self {
-      prod_ref: name.clone(),
-      rules: rules.clone(),
-      rule_idx,
-    }
+  pub fn new(rule_ref: ProductionRuleRef) -> Self {
+    Self { rule_ref }
   }
 
   pub fn from_production(production: &Rc<Production>) -> Vec<Self> {
@@ -47,10 +39,8 @@ impl ProductionInst {
       .rules
       .iter()
       .enumerate()
-      .map(|(idx, rules)| Self {
-        prod_ref: ProductionRef::new(Rc::downgrade(&production)),
-        rules: rules.clone(),
-        rule_idx: idx as u32,
+      .map(|(idx, rules)| {
+        Self::new(ProductionRef::new(Rc::downgrade(&production)).rule_ref(idx as u32))
       })
       .collect()
   }
@@ -64,7 +54,7 @@ impl ProductionInst {
     first_cache: &mut ProductionFirstTable,
   ) -> HashSet<Terminal> {
     if pos == 0 {
-      match first_cache.get(&self.prod_ref) {
+      match first_cache.get(&self.rule_ref) {
         Some(FirstCacheState::Hit(terms)) => {
           return terms.clone();
         }
@@ -76,15 +66,16 @@ impl ProductionInst {
         }
         None => {
           // Set the cache state to pending.
-          first_cache.insert(self.prod_ref.clone(), FirstCacheState::Pending);
+          first_cache.insert(self.rule_ref.clone(), FirstCacheState::Pending);
         }
       }
     }
 
-    debug_assert!(self.rules.rules.len() >= pos as usize);
+    let rules = self.rule_ref.rules();
+    debug_assert!(rules.len() >= pos);
     let mut terms = HashSet::new();
 
-    match self.rules.rule_at(pos) {
+    match rules.rule_at(pos) {
       Some(ProductionRule::Intermediate(production_ref)) => {
         let production = production_ref.deref();
         let prod_insts = Self::from_production(&production);
@@ -108,10 +99,10 @@ impl ProductionInst {
     // (i.e. pos == 0).
     if pos == 0 {
       // Insert into the cache if it doesn't already exist.
-      if let Some(state) = first_cache.get(&self.prod_ref) {
+      if let Some(state) = first_cache.get(&self.rule_ref) {
         match &state {
           FirstCacheState::Pending => {
-            first_cache.insert(self.prod_ref.clone(), FirstCacheState::Hit(terms.clone()));
+            first_cache.insert(self.rule_ref.clone(), FirstCacheState::Hit(terms.clone()));
           }
           _ => {}
         }
@@ -126,44 +117,11 @@ impl ProductionInst {
     // Only do this if this rule isn't complete yet. Otherwise, the presence of
     // epsilon means that this rule is skippable from this point, and therefore
     // the lookahead terminals are also possible first token.
-    if pos != self.rules.len() && terms.remove(&Terminal::Epsilon(Span::call_site().into())) {
+    if pos != rules.len() && terms.remove(&Terminal::Epsilon(Span::call_site().into())) {
       terms.extend(self.calculate_first_set(pos + 1, first_cache));
     }
 
     return terms;
-  }
-}
-
-impl Hash for ProductionInst {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    self.prod_ref.hash(state);
-    self.rule_idx.hash(state);
-  }
-}
-
-impl PartialEq for ProductionInst {
-  fn eq(&self, other: &Self) -> bool {
-    self.prod_ref == other.prod_ref && self.rule_idx == other.rule_idx
-  }
-}
-
-impl Eq for ProductionInst {}
-
-impl PartialOrd for ProductionInst {
-  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-    self
-      .prod_ref
-      .partial_cmp(&other.prod_ref)
-      .and_then(|cmp| Some(cmp.then(self.rule_idx.partial_cmp(&other.rule_idx)?)))
-  }
-}
-
-impl Ord for ProductionInst {
-  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-    self
-      .prod_ref
-      .cmp(&other.prod_ref)
-      .then(self.rule_idx.cmp(&other.rule_idx))
   }
 }
 
@@ -205,7 +163,7 @@ impl<'a> PartialProductionState {
   }
 
   pub fn is_complete(&self) -> bool {
-    self.pos as usize == self.inst.rules.rules.len()
+    self.pos == self.inst.rule_ref.rules().len()
   }
 
   // Returns the next symbol in this production, if there are any symbols left.
@@ -214,7 +172,7 @@ impl<'a> PartialProductionState {
       return None;
     }
 
-    return Some(&self.inst.rules.rules[self.pos as usize]);
+    return self.inst.rule_ref.rules().rule_at(self.pos);
   }
 }
 
@@ -291,7 +249,7 @@ impl ProductionState {
   }
 
   pub fn is_complete(&self) -> bool {
-    self.pos as usize == self.inst.rules.rules.len()
+    self.pos == self.inst.rule_ref.rules().len()
   }
 
   // Returns the next symbol in this production, if there are any symbols left.
@@ -300,11 +258,11 @@ impl ProductionState {
       return None;
     }
 
-    return Some(&self.inst.rules.rules[self.pos as usize]);
+    return self.inst.rule_ref.rules().rule_at(self.pos);
   }
 
   pub fn advance(&self) -> ProductionState {
-    debug_assert!((self.pos as usize) < self.inst.rules.rules.len());
+    debug_assert!(self.pos < self.inst.rule_ref.rules().len());
     Self {
       pos: self.pos + 1,
       ..self.clone()
@@ -326,7 +284,8 @@ impl Display for ProductionState {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     let mut rule_strs: Vec<_> = self
       .inst
-      .rules
+      .rule_ref
+      .rules()
       .rules
       .iter()
       .map(|rule| format!("{}", rule))
@@ -336,7 +295,7 @@ impl Display for ProductionState {
     write!(
       f,
       "[<{}> => {}, {}]",
-      self.inst.prod_ref.name(),
+      self.inst.rule_ref.name(),
       rule_strs.join(" "),
       &self
         .possible_lookaheads
@@ -380,7 +339,7 @@ impl Display for LRStateBuilder {
 #[derive(PartialEq, Eq)]
 enum ActionBuilder {
   Shift(LRStateBuilder),
-  Reduce(ProductionRef),
+  Reduce(ProductionRuleRef),
 }
 
 impl Display for ActionBuilder {
@@ -398,8 +357,8 @@ impl Display for ActionBuilder {
             .join(", ")
         )
       }
-      ActionBuilder::Reduce(prod_ref) => {
-        write!(f, "reduce({})", prod_ref)
+      ActionBuilder::Reduce(prod_rule_ref) => {
+        write!(f, "reduce({})", prod_rule_ref)
       }
     }
   }
@@ -428,9 +387,9 @@ impl TransitionSetBuilder {
       Some(ActionBuilder::Reduce(prod_ref)) => ParseError::new(
         &format!(
           "Shift/reduce conflict for rules {} (shift) and {} (reduce)",
-          prod_state.inst.prod_ref, prod_ref
+          prod_state.inst.rule_ref, prod_ref
         ),
-        prod_state.inst.prod_ref.span(),
+        prod_state.inst.rule_ref.span(),
       )
       .into(),
       None => {
@@ -442,28 +401,28 @@ impl TransitionSetBuilder {
     }
   }
 
-  fn insert_reduce(&mut self, term: Terminal, prod_ref: ProductionRef) -> ParseResult {
+  fn insert_reduce(&mut self, term: Terminal, prod_rule_ref: ProductionRuleRef) -> ParseResult {
     match self.action_map.get_mut(&term) {
       Some(action @ ActionBuilder::Shift(_)) => ParseError::new(
         &format!(
           "Shift/reduce conflict for rules {} (shift) and {} (reduce)",
-          action, prod_ref.production
+          action, prod_rule_ref
         ),
-        prod_ref.span(),
+        prod_rule_ref.span(),
       )
       .into(),
-      Some(ActionBuilder::Reduce(other_prod_ref)) => ParseError::new(
+      Some(ActionBuilder::Reduce(other_prod_rule_ref)) => ParseError::new(
         &format!(
           "Reduce/reduce conflict for rules {} and {}",
-          prod_ref.production, other_prod_ref.production
+          prod_rule_ref, other_prod_rule_ref
         ),
-        prod_ref.span(),
+        prod_rule_ref.span(),
       )
       .into(),
       None => {
         self
           .action_map
-          .insert(term, ActionBuilder::Reduce(prod_ref));
+          .insert(term, ActionBuilder::Reduce(prod_rule_ref));
         Ok(())
       }
     }
@@ -604,7 +563,7 @@ impl Closure {
       if state.is_complete() {
         // Completed states can be reduced.
         for term in &state.possible_lookaheads {
-          transitions.insert_reduce(term.clone(), state.inst.prod_ref.clone())?;
+          transitions.insert_reduce(term.clone(), state.inst.rule_ref.clone())?;
         }
 
         continue;
@@ -645,12 +604,9 @@ enum LRTableEntry {
   Unresolved(LRStateBuilder),
 }
 
-impl Borrow<LRStateBuilder> for Rc<LRTableEntry> {
-  fn borrow(&self) -> &LRStateBuilder {
-    match self.deref() {
-      LRTableEntry::Resolved(lr_state) => &lr_state.states,
-      LRTableEntry::Unresolved(lr_state_builder) => &lr_state_builder,
-    }
+impl From<LRStateBuilder> for LRTableEntry {
+  fn from(lr_state_builder: LRStateBuilder) -> Self {
+    Self::Unresolved(lr_state_builder)
   }
 }
 
@@ -666,7 +622,16 @@ impl Display for LRTableEntry {
 #[derive(PartialEq, Eq)]
 enum Action {
   Shift(Rc<LRTableEntry>),
-  Reduce(ProductionRef),
+  Reduce(ProductionRuleRef),
+}
+
+impl Display for Action {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    match self {
+      Action::Shift(_lr_table_entry) => write!(f, "shift(?)"),
+      Action::Reduce(prod_rule_ref) => write!(f, "reduce({})", prod_rule_ref.name()),
+    }
+  }
 }
 
 struct TransitionSet {
@@ -680,6 +645,28 @@ impl TransitionSet {
       action_map: HashMap::new(),
       goto_map: HashMap::new(),
     }
+  }
+}
+
+impl Display for TransitionSet {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    let mut first = true;
+    for (term, action) in &self.action_map {
+      if !first {
+        write!(f, "\n")?;
+      }
+      first = false;
+      write!(f, "{} -> {}", term, action)?;
+    }
+    for (prod_ref, _lr_table_entry) in &self.goto_map {
+      if !first {
+        write!(f, "\n")?;
+      }
+      first = false;
+      write!(f, "{} -> ?", prod_ref.name())?;
+    }
+
+    Ok(())
   }
 }
 
@@ -717,7 +704,7 @@ impl Eq for LRState {}
 
 impl Display for LRState {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    write!(f, "{}", self.states)
+    write!(f, "{}\n{}", self.states, self.transitions)
   }
 }
 
@@ -733,17 +720,18 @@ impl LRTable {
     first_table: &mut ProductionFirstTable,
     lr_state_builder: &LRStateBuilder,
   ) -> ParseResult<Rc<LRTableEntry>> {
-    if let Some(prior_lr_state) = states.get(lr_state_builder) {
+    let lr_table_entry = LRTableEntry::from(lr_state_builder.clone());
+    if let Some(prior_lr_state) = states.get(&lr_table_entry) {
       // TODO need to meld all possible_lookaheads in lr_state into prior_lr_state
       return Ok(prior_lr_state.clone());
     }
-    eprintln!("{}", lr_state_builder);
+    eprintln!("line: {}", lr_state_builder);
 
-    let lr_state = Rc::new(LRTableEntry::Unresolved(lr_state_builder.clone()));
+    let lr_state = Rc::new(lr_table_entry);
     states.insert(lr_state.clone());
 
     let closure = Closure::from_lr_states(lr_state_builder, first_table);
-    eprintln!("\t{}", closure);
+    eprintln!("\tclozure: {}", closure);
     let transitions = closure.transitions()?;
 
     let mut transition_set = TransitionSet::new();
@@ -788,26 +776,23 @@ impl LRTable {
     let init_state_ptr = grammar.starting_rule();
 
     let mut initial_lr_state = LRStateBuilder::new();
-    init_state_ptr.rules().iter().for_each(|rule| {
+    (0..init_state_ptr.deref().rules().len()).for_each(|idx| {
       initial_lr_state.insert(ProductionState::new(
-        ProductionInst::new(
-          &ProductionRef::new(Rc::downgrade(&init_state_ptr)),
-          &rule,
-          0,
-        ),
+        ProductionInst::new(init_state_ptr.rule_ref(idx as u32)),
         vec![Terminal::EndOfStream(Span::call_site().into())].into_iter(),
       ));
     });
 
+    // TODO start reading from here.
     let mut states = HashSet::new();
     let mut first_table = ProductionFirstTable::new();
 
-    let initial_state = Rc::new(LRTableEntry::Resolved(LRState::new(
-      vec![].into_iter(),
-      TransitionSet::new(),
-    )));
-    // let initial_state =
-    //   Self::calculate_transitions(&mut states, &mut first_table, &initial_lr_state)?;
+    // let initial_state = Rc::new(LRTableEntry::Resolved(LRState::new(
+    //   vec![].into_iter(),
+    //   TransitionSet::new(),
+    // )));
+    let initial_state =
+      Self::calculate_transitions(&mut states, &mut first_table, &initial_lr_state)?;
 
     Ok(Self {
       states,

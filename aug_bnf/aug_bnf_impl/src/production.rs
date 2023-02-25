@@ -502,9 +502,9 @@ impl ProductionRef {
   // Creates a production ref from a production.
   pub fn new(prod_ptr: Weak<Production>) -> Self {
     Self {
-      production: ProductionRefT::Resolved(prod_ptr),
+      production: ProductionRefT::Resolved(prod_ptr.clone()),
       alias: None,
-      span: Span::call_site(),
+      span: prod_ptr.upgrade().unwrap().span,
     }
   }
 
@@ -541,6 +541,15 @@ impl ProductionRef {
         );
       }
     }
+  }
+
+  /// Makes a new reference to a particular rule of a production.
+  pub fn rule_ref(&self, rule_idx: u32) -> ProductionRuleRef {
+    ProductionRuleRef::new(
+      self.deref(),
+      rule_idx,
+      self.deref().rules().get(rule_idx as usize).unwrap().span,
+    )
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut T) -> ParseResult<Self> {
@@ -705,6 +714,15 @@ impl ProductionRule {
       Self::Terminal(terminal) => terminal.span(),
     }
   }
+
+  fn is_epsilon(&self) -> bool {
+    if let ProductionRule::Terminal(term) = self {
+      if let Terminal::Epsilon(_) = term {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 impl ProductionRule {
@@ -759,6 +777,17 @@ impl ProductionRules {
     }
   }
 
+  pub fn filter_epsilon(self) -> Self {
+    Self {
+      rules: self
+        .rules
+        .into_iter()
+        .filter(|rule| !rule.is_epsilon())
+        .collect(),
+      span: self.span,
+    }
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let mut rules = Vec::new();
     let mut span = None;
@@ -800,6 +829,42 @@ impl Display for ProductionRules {
   }
 }
 
+/// ProductionRuleRef is a reference to a particular instance of a rule.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProductionRuleRef {
+  prod_ptr: Rc<Production>,
+  rule_idx: u32,
+  span: TransparentSpan,
+}
+
+impl ProductionRuleRef {
+  fn new(prod_ref: Rc<Production>, rule_idx: u32, span: Span) -> Self {
+    Self {
+      prod_ptr: prod_ref,
+      rule_idx,
+      span: span.into(),
+    }
+  }
+
+  pub fn name(&self) -> &str {
+    self.prod_ptr.name()
+  }
+
+  pub fn span(&self) -> Span {
+    self.span.span
+  }
+
+  pub fn rules(&self) -> &ProductionRules {
+    self.prod_ptr.rules().get(self.rule_idx as usize).unwrap()
+  }
+}
+
+impl Display for ProductionRuleRef {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}-{}", self.prod_ptr, self.rule_idx)
+  }
+}
+
 // <Production> => <ProductionName> "=>" <ProductionRules>
 //               | <Production> "|" <ProductionName> "=>" <ProductionRules>
 #[derive(Debug)]
@@ -817,6 +882,10 @@ impl Production {
 
   pub fn rules(&self) -> &Vec<ProductionRules> {
     &self.rules
+  }
+
+  pub fn name(&self) -> &str {
+    self.name.name()
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(
@@ -893,6 +962,18 @@ impl PartialEq for Production {
 
 impl Eq for Production {}
 
+impl PartialOrd for Production {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    self.name.partial_cmp(&other.name)
+  }
+}
+
+impl Ord for Production {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.name.cmp(&other.name)
+  }
+}
+
 impl Display for Production {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     write!(f, "{} => ", self.name)?;
@@ -960,8 +1041,10 @@ pub struct Grammar {
 }
 
 impl Grammar {
-  pub fn starting_rule(&self) -> Rc<Production> {
-    self.productions.get(&self.start_rule).unwrap().clone()
+  pub fn starting_rule(&self) -> ProductionRef {
+    ProductionRef::new(Rc::downgrade(
+      self.productions.get(&self.start_rule).unwrap(),
+    ))
   }
 
   pub fn from(token_stream: Vec<Symbol>) -> Self {

@@ -740,16 +740,37 @@ impl Display for ProductionRule {
   }
 }
 
-// <ProductionRules> => <ProductionRule> <ProductionRules>?
+#[derive(Clone, Debug)]
+pub struct Constructor {
+  pub tokens: TokenStream,
+  span: Span,
+}
+
+impl Constructor {
+  fn new(tokens: TokenStream, span: Span) -> Self {
+    Self { tokens, span }
+  }
+
+  pub fn span(&self) -> Span {
+    self.span
+  }
+}
+
+// <ProductionRules> => <ProductionRule> <ProductionRules>? | <Constructor>
 #[derive(Clone, Debug)]
 pub struct ProductionRules {
   pub rules: Vec<ProductionRule>,
+  pub constructor: Option<Constructor>,
   pub span: Span,
 }
 
 impl ProductionRules {
-  pub fn new(rules: Vec<ProductionRule>, span: Span) -> Self {
-    Self { rules, span }
+  fn new(rules: Vec<ProductionRule>, constructor: Option<Constructor>, span: Span) -> Self {
+    Self {
+      rules,
+      constructor,
+      span,
+    }
   }
 
   pub fn len(&self) -> u32 {
@@ -768,12 +789,13 @@ impl ProductionRules {
 
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let mut rules = Vec::<ProductionRule>::new();
-    let mut span = None;
+    let mut span: Option<Span> = None;
+    let mut constructor: Option<Constructor> = None;
 
     loop {
       let sym = peek_symbol_or(iter, "Unexpected end of stream.", Span::call_site())?;
 
-      match sym.sym {
+      match &sym.sym {
         SymbolT::Op(Operator::Semicolon) | SymbolT::Op(Operator::Pipe) => {
           if rules.len() == 0 {
             return ParseError::new(
@@ -781,35 +803,54 @@ impl ProductionRules {
               sym.span,
             )
             .into();
-          } else {
-            if rules.len() != 1 {
-              if let Some(epsilon) = rules.iter().find(|sym| {
-                **sym == ProductionRule::Terminal(Terminal::Epsilon(Span::call_site().into()))
-              }) {
-                return ParseError::new(
-                  "Epsilon may only appear by itself, remove this epsilon.",
-                  epsilon.span(),
-                )
-                .into();
-              }
-            }
-
-            return Ok(Self {
-              rules: rules
-                .into_iter()
-                .filter(|rule| !rule.is_epsilon())
-                .collect(),
-              span: span.unwrap(),
-            });
           }
+          break;
+        }
+        SymbolT::Group(tokens) => {
+          constructor = Some(Constructor::new(
+            tokens.clone(),
+            iter_span(tokens.clone().into_iter().map(|token| token.span())),
+          ));
+
+          // consume the symbol
+          iter.next();
         }
         _ => {
+          if constructor.is_some() {
+            return ParseError::new(
+              "Cannot have symbols following a production constructor.",
+              sym.span,
+            )
+            .into();
+          }
           let prod_rule = ProductionRule::parse(iter)?;
           span = span_join_opt!(span, prod_rule.span());
           rules.push(prod_rule);
         }
       }
     }
+
+    if rules.len() != 1 {
+      if let Some(epsilon) = rules
+        .iter()
+        .find(|sym| **sym == ProductionRule::Terminal(Terminal::Epsilon(Span::call_site().into())))
+      {
+        return ParseError::new(
+          "Epsilon may only appear by itself, remove this epsilon.",
+          epsilon.span(),
+        )
+        .into();
+      }
+    }
+
+    return Ok(Self {
+      rules: rules
+        .into_iter()
+        .filter(|rule| !rule.is_epsilon())
+        .collect(),
+      constructor,
+      span: span.unwrap(),
+    });
   }
 }
 
@@ -1138,7 +1179,11 @@ impl Grammar {
           new_rule_list.push(rule);
         }
 
-        new_rules_list.push(ProductionRules::new(new_rule_list, prod.span));
+        new_rules_list.push(ProductionRules::new(
+          new_rule_list,
+          prod.constructor.clone(),
+          prod.span,
+        ));
       }
 
       for prod in new_rules_list.iter() {

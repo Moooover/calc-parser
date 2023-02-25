@@ -512,9 +512,15 @@ fn main() {
   aug_bnf_impl::aug_bnf! {
     terminal: char;
 
-    <I> => <S>;
-    <S> => 'x' <A> 'y';
-    <S> => 'z' <A> 'w';
+    <I>: u32 => <S> {
+      $S
+    };
+    <S>: u32 => 'x' <A> 'y' {
+      1
+    };
+    <S>: u32 => 'z' <A> 'w' {
+      2
+    };
     <A> => 'a';
   }
 

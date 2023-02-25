@@ -815,8 +815,12 @@ impl ProductionRules {
 
 impl Display for ProductionRules {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    for rule in self.rules.iter() {
-      write!(f, "{} ", rule)?;
+    if self.rules.len() == 0 {
+      write!(f, "!")?;
+    } else {
+      for rule in self.rules.iter() {
+        write!(f, "{} ", rule)?;
+      }
     }
     Ok(())
   }

@@ -1,0 +1,130 @@
+program -> declList
+declList -> declList decl
+declList -> decl
+decl -> varDecl
+decl -> funDecl
+varDecl -> typeSpec varDeclList ;
+scopedVarDecl -> static typeSpec varDeclList ;
+scopedVarDecl -> typeSpec varDeclList ;
+varDeclList -> varDeclList , varDeclInit
+varDeclList -> varDeclInit
+varDeclInit -> varDeclId
+varDeclInit -> varDeclId : simpleExp
+varDeclId -> ID
+varDeclId -> ID [ NUMCONST ]
+typeSpec -> int
+typeSpec -> bool
+typeSpec -> char
+funDecl -> typeSpec ID ( parms ) stmt
+funDecl -> ID ( parms ) stmt
+parms -> parmList
+parms -> ''
+parmList -> parmList ; parmTypeList
+parmList -> parmTypeList
+parmTypeList -> typeSpec parmIdList
+parmIdList -> parmIdList , parmId
+parmIdList -> parmId
+parmId->ID
+parmId->IID [ ]
+stmt -> expStmt
+stmt -> compoundStmt
+stmt -> selectStmt
+stmt -> iterStmt
+stmt -> returnStmt
+stmt -> breakStmt
+expStmt -> exp ;
+expStmt -> ;
+compoundStmt -> { localDecls stmtList }
+localDecls -> localDecls scopedVarDecl
+localDecls -> ''
+stmtList -> stmtList stmt
+stmtList -> ''
+selectStmt -> if simpleExp then stmt
+selectStmt -> if simpleExp then stmt else stmt
+iterStmt -> while simpleExp do stmt
+iterStmt -> for ID = iterRange do stmt
+iterRange -> simpleExp to simpleExp
+iterRange -> simpleExp to simpleExp by simpleExp
+returnStmt -> return ;
+returnStmt -> return exp ;
+breakStmt -> break ;
+exp -> mutable = exp
+exp -> mutable + = exp
+exp -> mutable - = exp
+exp -> mutable * = exp
+exp -> mutable / = exp
+exp -> mutable + +
+exp -> mutable - -
+exp -> simpleExp
+simpleExp -> simpleExp or andExp
+simpleExp -> andExp
+andExp -> andExp and unaryRelExp
+andExp -> unaryRelExp
+unaryRelExp -> not unaryRelExp
+unaryRelExp -> relExp
+relExp -> minmaxExp relop minmaxExp
+relExp -> minmaxExp
+relop -> <=
+relop -> <
+relop -> >
+relop -> >=
+relop -> ==
+relop -> !=
+minmaxExp -> minmaxExp minmaxop sumExp
+minmaxExp -> sumExp
+minmaxop -> : > :
+minmaxop -> : < :
+sumExp -> sumExp sumop mulExp
+sumExp -> mulExp
+sumop-> +
+sumop-> -
+mulExp -> mulExp mulop unaryExp
+mulExp -> unaryExp
+mulop -> *
+mulop -> /
+mulop -> %
+unaryExp -> unaryop unaryExp
+unaryExp -> factor
+unaryop -> -
+unaryop -> *
+unaryop -> ?
+factor -> immutable
+factor -> mutable
+mutable -> ID
+mutable -> ID [ exp ]
+immutable -> ( exp )
+immutable -> call
+immutable -> constant
+call-> ID ( args )
+args -> argList
+args -> ''
+argList -> argList , exp
+argList -> exp
+constant -> NUMCONST
+constant -> CHARCONST
+constant -> STRINGCONST
+constant -> true
+constant -> false
+return -> a
+or -> |
+and -> &
+not -> !
+ID -> x
+NUMCONST -> 1
+CHARCONST -> o
+if -> i
+else -> e
+for -> f
+while -> w
+do -> d
+break -> r
+then -> t
+to -> 2
+by -> b
+static -> s
+int -> 0
+bool -> 3
+char -> 4
+STRINGCONST -> 5
+true -> y
+false -> z

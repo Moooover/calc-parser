@@ -854,7 +854,12 @@ impl ProductionRuleRef {
 
 impl Display for ProductionRuleRef {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    write!(f, "{}-{}", self.prod_ptr, self.rule_idx)
+    write!(
+      f,
+      "<{}> => {}",
+      self.prod_ptr.name(),
+      self.prod_ptr.rules().get(self.rule_idx as usize).unwrap(),
+    )
   }
 }
 

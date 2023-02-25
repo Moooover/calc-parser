@@ -559,7 +559,7 @@ fn main() {
     <andExp> => <andExp> <and> <unaryRelExp> | <unaryRelExp>;
     <unaryRelExp> => <not> <unaryRelExp> | <relExp>;
     <relExp> => <minmaxExp> <relop> <minmaxExp> | <minmaxExp>;
-    <relop> => '<' '=' | '<' | '>' | '>' '=' | '=' '=' | '!' '=';
+    <relop> => '<' '=' | '<' | '>' | '>' '=' | 'q' | '!' '=';
     <minmaxExp> => <minmaxExp> <minmaxop> <sumExp> | <sumExp>;
     <minmaxop> => ':' '>' ':' | ':' '<' ':';
     <sumExp> => <sumExp> <sumop> <mulExp> | <mulExp>;

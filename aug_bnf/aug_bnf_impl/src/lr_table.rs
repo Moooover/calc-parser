@@ -609,7 +609,7 @@ impl Closure {
       }
     }
 
-    eprintln!("{}", transitions);
+    // eprintln!("{}", transitions);
 
     Ok(transitions)
   }
@@ -627,16 +627,15 @@ impl Display for Closure {
   }
 }
 
-#[derive(Hash, PartialEq, Eq)]
 enum LRTableEntry {
   Resolved(LRState),
   Unresolved(LRStateBuilder),
 }
 
 impl LRTableEntry {
-  fn state_builder_ref(&mut self) -> &mut LRStateBuilder {
+  fn state_builder_ref(&self) -> &LRStateBuilder {
     match self {
-      LRTableEntry::Resolved(lr_state) => &mut lr_state.states,
+      LRTableEntry::Resolved(lr_state) => &lr_state.states,
       LRTableEntry::Unresolved(lr_state_builder) => lr_state_builder,
     }
   }
@@ -647,6 +646,20 @@ impl From<LRStateBuilder> for LRTableEntry {
     Self::Unresolved(lr_state_builder)
   }
 }
+
+impl Hash for LRTableEntry {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.state_builder_ref().hash(state);
+  }
+}
+
+impl PartialEq for LRTableEntry {
+  fn eq(&self, other: &Self) -> bool {
+    self.state_builder_ref() == other.state_builder_ref()
+  }
+}
+
+impl Eq for LRTableEntry {}
 
 impl Display for LRTableEntry {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -792,13 +805,16 @@ impl LRTable {
     if let Some(prior_lr_state) = states.get(&lr_table_entry) {
       return Ok(prior_lr_state.clone());
     }
-    eprintln!("line: {}", lr_state_builder);
+    if states.len() % 100 == 0 {
+      eprintln!("states: {}", states.len());
+    }
+    // eprintln!("line: {}", lr_state_builder);
 
     let lr_state = Rc::new(lr_table_entry);
-    states.insert(lr_state.clone());
+    assert!(states.insert(lr_state.clone()));
 
     let closure = Closure::from_lr_states(lr_state_builder, first_table);
-    eprintln!("\tclozure: {}", closure);
+    // eprintln!("\tclozure: {}", closure);
     let transitions = closure.transitions()?;
 
     let mut transition_set = TransitionSet::new();

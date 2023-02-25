@@ -651,7 +651,7 @@ impl From<LRStateBuilder> for LRTableEntry {
 impl Display for LRTableEntry {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
-      LRTableEntry::Resolved(lr_state) => write!(f, "resolved({})", lr_state),
+      LRTableEntry::Resolved(lr_state) => write!(f, "{}", lr_state),
       LRTableEntry::Unresolved(lr_state_builder) => write!(f, "unresolved({})", lr_state_builder),
     }
   }
@@ -666,7 +666,22 @@ enum Action {
 impl Display for Action {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
-      Action::Shift(_lr_table_entry) => write!(f, "shift(?)"),
+      Action::Shift(lr_table_entry) => write!(
+        f,
+        "shift({})",
+        match lr_table_entry.deref() {
+          LRTableEntry::Resolved(lr_state) => {
+            lr_state
+              .states
+              .states
+              .iter()
+              .map(|state| format!("{}", state))
+              .collect::<Vec<_>>()
+              .join(", ")
+          }
+          _ => unreachable!(),
+        }
+      ),
       Action::Reduce(prod_rule_ref) => write!(f, "reduce({})", prod_rule_ref.name()),
     }
   }
@@ -696,12 +711,28 @@ impl Display for TransitionSet {
       first = false;
       write!(f, "{} -> {}", term, action)?;
     }
-    for (prod_ref, _lr_table_entry) in &self.goto_map {
+    for (prod_ref, lr_table_entry) in &self.goto_map {
       if !first {
         write!(f, "\n")?;
       }
       first = false;
-      write!(f, "{} -> ?", prod_ref.name())?;
+      write!(
+        f,
+        "{} -> goto {}",
+        prod_ref.name(),
+        match lr_table_entry.deref() {
+          LRTableEntry::Resolved(lr_state) => {
+            lr_state
+              .states
+              .states
+              .iter()
+              .map(|state| format!("{}", state))
+              .collect::<Vec<_>>()
+              .join(", ")
+          }
+          _ => unreachable!(),
+        }
+      )?;
     }
 
     Ok(())
@@ -748,7 +779,6 @@ impl Display for LRState {
 
 pub struct LRTable {
   states: HashSet<Rc<LRTableEntry>>,
-  first_table: ProductionFirstTable,
   initial_state: Rc<LRTableEntry>,
 }
 
@@ -762,27 +792,6 @@ impl LRTable {
     if let Some(prior_lr_state) = states.get(&lr_table_entry) {
       return Ok(prior_lr_state.clone());
     }
-    // let lr_state = if let Some(mut prior_lr_state) = states.take(&lr_table_entry) {
-    //   let state = unsafe { Rc::get_mut_unchecked(&mut prior_lr_state) };
-    //   let changed = state.state_builder_ref().meld(lr_state_builder);
-
-    //   // If the entry didn't change from the meld, then we can return the
-    //   // cached state.
-    //   if !changed {
-    //     states.insert(prior_lr_state.clone());
-    //     return Ok(prior_lr_state);
-    //   }
-
-    //   // Otherwise, we need to recompute the transitions from this state.
-    //   *state = LRTableEntry::Unresolved(state.state_builder_ref().clone());
-    //   states.insert(prior_lr_state.clone());
-    //   prior_lr_state
-    // } else {
-    //   let lr_state = Rc::new(lr_table_entry);
-    //   states.insert(lr_state.clone());
-
-    //   lr_state
-    // };
     eprintln!("line: {}", lr_state_builder);
 
     let lr_state = Rc::new(lr_table_entry);
@@ -815,9 +824,6 @@ impl LRTable {
       transition_set.goto_map.insert(prod_ref, child_lr_state);
     }
 
-    if states.get(&lr_state).is_none() {
-      return ParseError::new("Huh, got none state!", Span::call_site()).into();
-    }
     let mut lr_state = states.take(&lr_state).unwrap();
     if let LRTableEntry::Unresolved(lr_state_builder) = lr_state.deref() {
       unsafe {
@@ -828,7 +834,7 @@ impl LRTable {
       }
       states.insert(lr_state.clone());
     } else {
-      abort!(Span::call_site(), "Unexpected resolved LR table entry");
+      return ParseError::new("Unexpected resolved LR table entry", Span::call_site()).into();
     }
     return Ok(lr_state);
   }
@@ -844,20 +850,14 @@ impl LRTable {
       ));
     });
 
-    // TODO start reading from here.
     let mut states = HashSet::new();
     let mut first_table = ProductionFirstTable::new();
 
-    // let initial_state = Rc::new(LRTableEntry::Resolved(LRState::new(
-    //   vec![].into_iter(),
-    //   TransitionSet::new(),
-    // )));
     let initial_state =
       Self::calculate_transitions(&mut states, &mut first_table, &initial_lr_state)?;
 
     Ok(Self {
       states,
-      first_table,
       initial_state,
     })
   }

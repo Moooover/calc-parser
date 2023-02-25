@@ -258,6 +258,14 @@ impl ProductionState {
 
     return self.inst.rule_ref.rules().rule_at(self.pos);
   }
+
+  pub fn advance(&self) -> Self {
+    debug_assert!(self.pos + 1 < self.inst.rule_ref.rules().len());
+    Self {
+      pos: self.pos + 1,
+      ..self.clone()
+    }
+  }
 }
 
 impl From<PartialProductionState> for ProductionState {
@@ -561,10 +569,10 @@ impl Closure {
 
       match state.next_sym() {
         Some(ProductionRule::Intermediate(intermediate)) => {
-          transitions.insert_goto(intermediate.clone(), state.clone())?;
+          transitions.insert_goto(intermediate.clone(), state.advance())?;
         }
         Some(ProductionRule::Terminal(term)) => {
-          transitions.insert_shift(term.clone(), state.clone())?;
+          transitions.insert_shift(term.clone(), state.advance())?;
         }
         None => unreachable!(),
       }
@@ -747,6 +755,9 @@ impl LRTable {
       transition_set.goto_map.insert(prod_ref, child_lr_state);
     }
 
+    if states.get(&lr_state).is_none() {
+      return ParseError::new("Huh, got none state!", Span::call_site()).into();
+    }
     let mut lr_state = states.take(&lr_state).unwrap();
     if let LRTableEntry::Unresolved(lr_state_builder) = lr_state.deref() {
       unsafe {

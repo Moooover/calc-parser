@@ -531,20 +531,9 @@ impl ProductionRef {
     }
   }
 
-  pub fn deref_weak(&self) -> Weak<Production> {
-    match &self.production {
-      ProductionRefT::Resolved(resolved) => resolved.clone(),
-      ProductionRefT::Unresolved(unresolved) => {
-        panic!(
-          "Attempt to resolve unresolved production ref {}",
-          unresolved
-        );
-      }
-    }
-  }
-
   /// Makes a new reference to a particular rule of a production.
   pub fn rule_ref(&self, rule_idx: u32) -> ProductionRuleRef {
+    debug_assert!((rule_idx as usize) < self.deref().rules().len());
     ProductionRuleRef::new(
       self.deref(),
       rule_idx,

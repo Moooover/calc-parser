@@ -267,6 +267,17 @@ impl ProductionState {
       ..self.clone()
     }
   }
+
+  /// Merges the possible lookaheads of state into self, returning true if self
+  /// changed at all.
+  pub fn merge(&mut self, state: &Self) -> bool {
+    debug_assert!(*self == *state);
+    let prior_size = self.possible_lookaheads.len();
+    self
+      .possible_lookaheads
+      .extend(state.possible_lookaheads.clone());
+    return prior_size != self.possible_lookaheads.len();
+  }
 }
 
 impl From<PartialProductionState> for ProductionState {
@@ -320,6 +331,25 @@ impl LRStateBuilder {
 
   fn insert(&mut self, state: ProductionState) -> bool {
     self.states.insert(state)
+  }
+
+  /// Melds two states which are equivalent but have potentially different
+  /// lookaheads, returning true if the state changed at all.
+  fn meld(&mut self, state: &LRStateBuilder) -> bool {
+    let mut any_changed = false;
+
+    self.states = self
+      .states
+      .iter()
+      .zip(state.states.iter())
+      .map(|(prod_state, other_prod_state)| {
+        let mut prod_state = prod_state.clone();
+        any_changed = prod_state.merge(other_prod_state) || any_changed;
+        prod_state
+      })
+      .collect();
+
+    return any_changed;
   }
 }
 
@@ -603,6 +633,15 @@ enum LRTableEntry {
   Unresolved(LRStateBuilder),
 }
 
+impl LRTableEntry {
+  fn state_builder_ref(&mut self) -> &mut LRStateBuilder {
+    match self {
+      LRTableEntry::Resolved(lr_state) => &mut lr_state.states,
+      LRTableEntry::Unresolved(lr_state_builder) => lr_state_builder,
+    }
+  }
+}
+
 impl From<LRStateBuilder> for LRTableEntry {
   fn from(lr_state_builder: LRStateBuilder) -> Self {
     Self::Unresolved(lr_state_builder)
@@ -721,9 +760,29 @@ impl LRTable {
   ) -> ParseResult<Rc<LRTableEntry>> {
     let lr_table_entry = LRTableEntry::from(lr_state_builder.clone());
     if let Some(prior_lr_state) = states.get(&lr_table_entry) {
-      // TODO need to meld all possible_lookaheads in lr_state into prior_lr_state
       return Ok(prior_lr_state.clone());
     }
+    // let lr_state = if let Some(mut prior_lr_state) = states.take(&lr_table_entry) {
+    //   let state = unsafe { Rc::get_mut_unchecked(&mut prior_lr_state) };
+    //   let changed = state.state_builder_ref().meld(lr_state_builder);
+
+    //   // If the entry didn't change from the meld, then we can return the
+    //   // cached state.
+    //   if !changed {
+    //     states.insert(prior_lr_state.clone());
+    //     return Ok(prior_lr_state);
+    //   }
+
+    //   // Otherwise, we need to recompute the transitions from this state.
+    //   *state = LRTableEntry::Unresolved(state.state_builder_ref().clone());
+    //   states.insert(prior_lr_state.clone());
+    //   prior_lr_state
+    // } else {
+    //   let lr_state = Rc::new(lr_table_entry);
+    //   states.insert(lr_state.clone());
+
+    //   lr_state
+    // };
     eprintln!("line: {}", lr_state_builder);
 
     let lr_state = Rc::new(lr_table_entry);

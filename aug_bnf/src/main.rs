@@ -498,15 +498,24 @@ fn main() {
   //   <B> => 'a' 'c';
   // };
 
+  // aug_bnf_impl::aug_bnf! {
+  //   terminal: char;
+
+  //   <I> => <S>;
+  //   <S> => 'a' <S> 'x'
+  //        | 'c' <S> 'z'
+  //        | <B>;
+  //   <B> => <B> 'b'
+  //        | !;
+  // }
+
   aug_bnf_impl::aug_bnf! {
     terminal: char;
 
     <I> => <S>;
-    <S> => 'a' <S> 'x'
-         | 'c' <S> 'z'
-         | <B>;
-    <B> => <B> 'b'
-         | !;
+    <S> => 'x' <A> 'y';
+    <S> => 'z' <A> 'w';
+    <A> => 'a';
   }
 
   /*

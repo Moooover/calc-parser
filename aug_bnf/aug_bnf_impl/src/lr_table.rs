@@ -1,15 +1,13 @@
 use proc_macro::Span;
 use proc_macro_error::abort;
-use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::lr_table;
 use crate::production::{
-  Grammar, Production, ProductionRef, ProductionRule, ProductionRuleRef, ProductionRules, Terminal,
+  Grammar, Production, ProductionRef, ProductionRule, ProductionRuleRef, Terminal,
 };
 use crate::util::{ParseError, ParseResult};
 
@@ -39,7 +37,7 @@ impl ProductionInst {
       .rules
       .iter()
       .enumerate()
-      .map(|(idx, rules)| {
+      .map(|(idx, _rules)| {
         Self::new(ProductionRef::new(Rc::downgrade(&production)).rule_ref(idx as u32))
       })
       .collect()
@@ -260,14 +258,6 @@ impl ProductionState {
 
     return self.inst.rule_ref.rules().rule_at(self.pos);
   }
-
-  pub fn advance(&self) -> ProductionState {
-    debug_assert!(self.pos < self.inst.rule_ref.rules().len());
-    Self {
-      pos: self.pos + 1,
-      ..self.clone()
-    }
-  }
 }
 
 impl From<PartialProductionState> for ProductionState {
@@ -449,7 +439,7 @@ impl Display for TransitionSetBuilder {
     let mut was_prev = false;
     for (term, action) in &self.action_map {
       if !was_prev {
-        write!(f, "\n");
+        write!(f, "\n")?;
       } else {
         was_prev = true;
       }
@@ -457,7 +447,7 @@ impl Display for TransitionSetBuilder {
     }
     for (prod_ref, prod_refs) in &self.goto_map {
       if !was_prev {
-        write!(f, "\n");
+        write!(f, "\n")?;
       } else {
         was_prev = true;
       }

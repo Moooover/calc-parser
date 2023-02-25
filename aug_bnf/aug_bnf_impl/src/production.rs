@@ -701,7 +701,7 @@ impl Display for ProductionRef {
 }
 
 // <ProductionRule> => <ProductionRef> | <TerminalSym>
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProductionRule {
   Intermediate(ProductionRef),
   Terminal(Terminal),
@@ -777,19 +777,8 @@ impl ProductionRules {
     }
   }
 
-  pub fn filter_epsilon(self) -> Self {
-    Self {
-      rules: self
-        .rules
-        .into_iter()
-        .filter(|rule| !rule.is_epsilon())
-        .collect(),
-      span: self.span,
-    }
-  }
-
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
-    let mut rules = Vec::new();
+    let mut rules = Vec::<ProductionRule>::new();
     let mut span = None;
 
     loop {
@@ -804,8 +793,23 @@ impl ProductionRules {
             )
             .into();
           } else {
+            if rules.len() != 1 {
+              if let Some(epsilon) = rules.iter().find(|sym| {
+                **sym == ProductionRule::Terminal(Terminal::Epsilon(Span::call_site().into()))
+              }) {
+                return ParseError::new(
+                  "Epsilon may only appear by itself, remove this epsilon.",
+                  epsilon.span(),
+                )
+                .into();
+              }
+            }
+
             return Ok(Self {
-              rules,
+              rules: rules
+                .into_iter()
+                .filter(|rule| !rule.is_epsilon())
+                .collect(),
               span: span.unwrap(),
             });
           }

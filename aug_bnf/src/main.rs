@@ -526,7 +526,7 @@ fn main() {
     <A> => 'a';
   }
 
-  let x = vec!['a', 'b', 'c'];
+  let x = vec!['x', 'a', 'y'];
   let res = Test::parse(x.iter());
 
   match res {

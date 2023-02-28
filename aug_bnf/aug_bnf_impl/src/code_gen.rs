@@ -1,7 +1,7 @@
 use quote::quote;
 
 use crate::lr_table::{LRState, LRTable};
-use crate::production::{Grammar, ProductionRule, Terminal};
+use crate::production::{Grammar, ProductionRule};
 
 struct CodeGen<'a> {
   grammar: &'a Grammar,
@@ -66,7 +66,46 @@ impl<'a> CodeGen<'a> {
   }
 
   fn generate_dfa_states(&self) -> proc_macro2::TokenStream {
-    quote! {}
+    self
+      .lr_table
+      .states
+      .iter()
+      .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
+        let lr_state = lr_entry.lr_state();
+        let dfa_state = self.to_enum_variant_no_prefix(lr_state);
+        quote! {
+          #dfa_state,
+          #tokens
+        }
+      })
+  }
+
+  fn generate_match_loop(&self) -> proc_macro2::TokenStream {
+    let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
+    quote! {
+      let mut states = vec![#initial_state];
+      loop {
+        let state = states.pop().unwrap();
+        let next_token = input_stream.peek();
+
+        match (state, next_token) {
+          (#initial_state, None) => {
+            return Some(42);
+          }
+          _ => {
+            match next_token {
+              Some(token) => {
+                eprintln!("Unexpected token \"{}\"", token);
+              }
+              None => {
+                eprintln!("Unexpected end of input");
+              }
+            }
+            return None;
+          }
+        }
+      }
+    }
   }
 
   fn generate(&self) -> proc_macro2::TokenStream {
@@ -79,19 +118,8 @@ impl<'a> CodeGen<'a> {
       "{}",
       self.to_enum_variant(self.lr_table.initial_state.lr_state())
     );
-    let states =
-      self
-        .lr_table
-        .states
-        .iter()
-        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
-          let lr_state = lr_entry.lr_state();
-          let dfa_state = self.to_enum_variant_no_prefix(lr_state);
-          quote! {
-            #dfa_state,
-            #tokens
-          }
-        });
+    let states = self.generate_dfa_states();
+    let match_loop = self.generate_match_loop();
 
     quote! {
       enum #dfa_name {
@@ -104,12 +132,10 @@ impl<'a> CodeGen<'a> {
         /// Parses an input stream according to the grammar, returning the
         /// constructed object from a correctly formatted input, or None if the
         /// input was not a sentential form of the grammar.
-        pub fn parse<'a, I: Iterator<Item = &'a #terminal_type>>(input_stream: I) -> Option<#root_type> {
-          for term in input_stream {
-            println!("{}", term);
-          }
+        pub fn parse<'a, I: Iterator<Item = &'a #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
+          let mut input_stream = input_stream.peekable();
 
-          None
+          #match_loop
         }
       }
     }

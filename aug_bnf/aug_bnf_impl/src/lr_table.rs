@@ -10,7 +10,7 @@ use crate::production::{
 };
 use crate::util::{ParseError, ParseResult};
 
-enum FirstCacheState {
+pub enum FirstCacheState {
   Hit(HashSet<Terminal>),
   // The terminals for this state are currently being calculated.
   Pending,
@@ -18,7 +18,7 @@ enum FirstCacheState {
 
 /// A cache of the sets of possible first elements seen in a production rule,
 /// given the production's name.
-type ProductionFirstTable = HashMap<ProductionRuleRef, FirstCacheState>;
+pub type ProductionFirstTable = HashMap<ProductionRuleRef, FirstCacheState>;
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProductionInst {
@@ -274,17 +274,6 @@ impl ProductionState {
       Some(&self.inst.rule_ref.rules().rules[self.pos as usize - 1])
     }
   }
-
-  /// Merges the possible lookaheads of state into self, returning true if self
-  /// changed at all.
-  pub fn merge(&mut self, state: &Self) -> bool {
-    debug_assert!(*self == *state);
-    let prior_size = self.possible_lookaheads.len();
-    self
-      .possible_lookaheads
-      .extend(state.possible_lookaheads.clone());
-    return prior_size != self.possible_lookaheads.len();
-  }
 }
 
 impl From<PartialProductionState> for ProductionState {
@@ -338,25 +327,6 @@ impl LRStateBuilder {
 
   fn insert(&mut self, state: ProductionState) -> bool {
     self.states.insert(state)
-  }
-
-  /// Melds two states which are equivalent but have potentially different
-  /// lookaheads, returning true if the state changed at all.
-  fn meld(&mut self, state: &LRStateBuilder) -> bool {
-    let mut any_changed = false;
-
-    self.states = self
-      .states
-      .iter()
-      .zip(state.states.iter())
-      .map(|(prod_state, other_prod_state)| {
-        let mut prod_state = prod_state.clone();
-        any_changed = prod_state.merge(other_prod_state) || any_changed;
-        prod_state
-      })
-      .collect();
-
-    return any_changed;
   }
 }
 

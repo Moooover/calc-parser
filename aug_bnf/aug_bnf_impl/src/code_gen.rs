@@ -1,7 +1,7 @@
 use quote::quote;
 
 use crate::lr_table::{LRState, LRTable};
-use crate::production::Grammar;
+use crate::production::{Grammar, ProductionRule, Terminal};
 
 struct CodeGen<'a> {
   grammar: &'a Grammar,
@@ -33,12 +33,33 @@ impl<'a> CodeGen<'a> {
     }
   }
 
-  fn to_enum_variant(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
-    let dfa_name = &self.dfa_name;
+  fn to_enum_variant_no_prefix(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
     let lr_state_name = syn::Ident::new(
       &format!("S{}", lr_state.uid),
       proc_macro2::Span::call_site(),
     );
+
+    let state = match lr_state.last_sym() {
+      Some(ProductionRule::Intermediate(prod)) => Some(prod.deref().name.type_spec_as_type()),
+      Some(ProductionRule::Terminal(_term)) => Some(self.terminal_type.clone()),
+      None => None,
+    };
+
+    if state.is_some() {
+      let state = state.unwrap();
+      quote! {
+        #lr_state_name(#state)
+      }
+    } else {
+      quote! {
+        #lr_state_name
+      }
+    }
+  }
+
+  fn to_enum_variant(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+    let dfa_name = &self.dfa_name;
+    let lr_state_name = self.to_enum_variant_no_prefix(lr_state);
     quote! {
       #dfa_name :: #lr_state_name
     }
@@ -55,12 +76,27 @@ impl<'a> CodeGen<'a> {
     let root_type = &self.root_type;
 
     eprintln!(
-      "{:?}",
+      "{}",
       self.to_enum_variant(self.lr_table.initial_state.lr_state())
     );
+    let states =
+      self
+        .lr_table
+        .states
+        .iter()
+        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
+          let lr_state = lr_entry.lr_state();
+          let dfa_state = self.to_enum_variant_no_prefix(lr_state);
+          quote! {
+            #dfa_state,
+            #tokens
+          }
+        });
 
     quote! {
-      enum #dfa_name {}
+      enum #dfa_name {
+        #states
+      }
 
       struct #parser_name {}
 

@@ -267,6 +267,14 @@ impl ProductionState {
     }
   }
 
+  pub fn prev_sym(&self) -> Option<&ProductionRule> {
+    if self.pos == 0 {
+      None
+    } else {
+      Some(&self.inst.rule_ref.rules().rules[self.pos as usize - 1])
+    }
+  }
+
   /// Merges the possible lookaheads of state into self, returning true if self
   /// changed at all.
   pub fn merge(&mut self, state: &Self) -> bool {
@@ -777,6 +785,11 @@ impl LRState {
       transitions,
       uid,
     }
+  }
+
+  pub fn last_sym(&self) -> Option<&ProductionRule> {
+    let repr_state = self.states.states.iter().next().unwrap();
+    repr_state.prev_sym()
   }
 }
 

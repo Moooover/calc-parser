@@ -1,6 +1,6 @@
 use quote::quote;
 
-use crate::lr_table::{LRState, LRTable};
+use crate::lr_table::{Action, LRState, LRTable};
 use crate::production::{Grammar, ProductionRule};
 
 struct CodeGen<'a> {
@@ -65,6 +65,17 @@ impl<'a> CodeGen<'a> {
     }
   }
 
+  fn to_enum_inst(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+    let dfa_name = &self.dfa_name;
+    let lr_state_name = syn::Ident::new(
+      &format!("S{}", lr_state.uid),
+      proc_macro2::Span::call_site(),
+    );
+    quote! {
+      #dfa_name :: #lr_state_name
+    }
+  }
+
   fn generate_dfa_states(&self) -> proc_macro2::TokenStream {
     self
       .lr_table
@@ -80,18 +91,66 @@ impl<'a> CodeGen<'a> {
       })
   }
 
+  fn generate_dfa_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+    let enum_variant = self.to_enum_variant(lr_state);
+
+    lr_state.transitions.action_map.iter().fold(
+      proc_macro2::TokenStream::new(),
+      |tokens, (term, action)| {
+        let term_pattern = term.as_peek_pattern();
+
+        match action {
+          Action::Shift(lr_table_entry) => {
+            let next_lr_state = lr_table_entry.lr_state();
+            let next_state = self.to_enum_inst(next_lr_state);
+            let sym_tokens = term.as_sym_tokens();
+
+            quote! {
+              #tokens
+              (#enum_variant, #term_pattern) => {
+                println!("Consuming {}", #sym_tokens);
+                // Consume the token.
+                input_stream.next();
+                states.push(#next_state(#sym_tokens));
+              }
+            }
+          }
+          Action::Reduce(_) => quote! {
+            #tokens
+            (#enum_variant, #term_pattern) => {
+              println!("Got to this guy!");
+              return None;
+            }
+          },
+        }
+      },
+    )
+  }
+
   fn generate_match_loop(&self) -> proc_macro2::TokenStream {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
+    let state_transitions =
+      self
+        .lr_table
+        .states
+        .iter()
+        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
+          let lr_state = lr_entry.lr_state();
+          let dfa_state = self.generate_dfa_transitions(lr_state);
+          quote! {
+            #dfa_state,
+            #tokens
+          }
+        });
+
     quote! {
       let mut states = vec![#initial_state];
       loop {
-        let state = states.pop().unwrap();
+        let state = states.last().unwrap();
         let next_token = input_stream.peek();
 
         match (state, next_token) {
-          (#initial_state, None) => {
-            return Some(42);
-          }
+          #state_transitions
           _ => {
             match next_token {
               Some(token) => {
@@ -114,10 +173,6 @@ impl<'a> CodeGen<'a> {
     let terminal_type = &self.terminal_type;
     let root_type = &self.root_type;
 
-    eprintln!(
-      "{}",
-      self.to_enum_variant(self.lr_table.initial_state.lr_state())
-    );
     let states = self.generate_dfa_states();
     let match_loop = self.generate_match_loop();
 

@@ -655,7 +655,7 @@ impl Display for LRTableEntry {
 }
 
 #[derive(PartialEq, Eq)]
-enum Action {
+pub enum Action {
   Shift(Rc<LRTableEntry>),
   Reduce(ProductionRuleRef),
 }
@@ -685,8 +685,8 @@ impl Display for Action {
 }
 
 pub struct TransitionSet {
-  action_map: HashMap<Terminal, Action>,
-  goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
+  pub action_map: HashMap<Terminal, Action>,
+  pub goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
 }
 
 impl TransitionSet {

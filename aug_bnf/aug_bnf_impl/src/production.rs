@@ -190,8 +190,8 @@ pub struct TransparentSpan {
 }
 
 impl TransparentSpan {
-  pub fn span(&self) -> &Span {
-    &self.span
+  pub fn span(&self) -> Span {
+    self.span
   }
 }
 
@@ -308,6 +308,34 @@ impl Terminal {
       Terminal::EndOfStream(span) => span.span().clone(),
       Terminal::Epsilon(span) => span.span().clone(),
       Terminal::Sym(sym) => sym.span.span().clone(),
+    }
+  }
+
+  /// Will expand to `Some(tokens)` if this is a `Terminal::Sym` or `None` if
+  /// this is a `Terminal::EndOfStream`. `Terminal::Epsilon` should never call
+  /// this.
+  pub fn as_peek_pattern(&self) -> proc_macro2::TokenStream {
+    match self {
+      Terminal::EndOfStream(span) => quote::quote_spanned!(span.span().into()=> None),
+      Terminal::Epsilon(_) => unreachable!(),
+      Terminal::Sym(sym) => {
+        let tokens: proc_macro2::TokenStream = sym.tokens.clone().into();
+        quote::quote! {
+          Some(#tokens)
+        }
+      }
+    }
+  }
+
+  pub fn as_sym_tokens(&self) -> proc_macro2::TokenStream {
+    match self {
+      Terminal::Sym(sym) => {
+        let tokens: proc_macro2::TokenStream = sym.tokens.clone().into();
+        quote::quote! {
+          #tokens
+        }
+      }
+      _ => unreachable!(),
     }
   }
 

@@ -115,13 +115,45 @@ impl<'a> CodeGen<'a> {
               }
             }
           }
-          Action::Reduce(_) => quote! {
-            #tokens
-            (#enum_variant, #term_pattern) => {
-              println!("Got to this guy!");
-              return None;
+          Action::Reduce(prod_rule_ref) => {
+            let rules = &prod_rule_ref.rules().rules;
+
+            let var_builders =
+              rules
+                .iter()
+                .rev()
+                .fold(proc_macro2::TokenStream::new(), |tokens, prod_rule| {
+                  match prod_rule {
+                    ProductionRule::Intermediate(prod_ref) => {
+                      let prod = prod_ref.deref();
+                      // The type of values returned by constructors of this
+                      // production.
+                      let val_type = prod.name.type_spec_as_type();
+
+                      // TODO next: figure out which enum variant this should be
+                      quote! {
+                        match states.pop() {
+                          Some()
+                        }
+                      }
+                    }
+                    ProductionRule::Terminal(term) => {
+                      // TODO capture terminals too, either with $<index> or aliases
+                      quote! {
+                        states.pop();
+                      }
+                    }
+                  }
+                });
+
+            quote! {
+              #tokens
+              (#enum_variant, #term_pattern) => {
+                println!("Got to this guy!");
+                return None;
+              }
             }
-          },
+          }
         }
       },
     )

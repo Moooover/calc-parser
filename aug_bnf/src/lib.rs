@@ -45,6 +45,7 @@ mod tests {
   #[test]
   fn add_mul_grammar() {
     aug_bnf_impl::aug_bnf! {
+      name: Test;
       terminal: char;
 
       <S> => <A> $;

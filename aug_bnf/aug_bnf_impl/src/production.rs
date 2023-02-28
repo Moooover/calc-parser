@@ -99,12 +99,23 @@ impl ParserState {
 }
 
 #[derive(Clone, Debug)]
-struct Type {
+pub struct Type {
   pub tokens: TokenStream,
   pub span: Span,
 }
 
 impl Type {
+  pub fn unit() -> Type {
+    Type {
+      tokens: quote::quote! { () }.into(),
+      span: Span::call_site(),
+    }
+  }
+
+  pub fn as_type(&self) -> syn::Type {
+    syn::Type::Verbatim(self.tokens.clone().into())
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let mut tokens = TokenStream::new();
     let mut span: Option<Span> = None;
@@ -136,6 +147,40 @@ impl Type {
 impl Display for Type {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     write!(f, "{}", self.tokens)
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParserName {
+  pub name: String,
+  pub span: Span,
+}
+
+impl ParserName {
+  pub fn as_ident(&self) -> syn::Ident {
+    syn::Ident::new(&self.name, self.span.into())
+  }
+
+  pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
+    let sym = next_symbol_or(iter, "Expected name.", Span::call_site())?;
+
+    let name = match sym.sym {
+      SymbolT::Ident(ident) => ident,
+      _ => {
+        return ParseError::new("Unexpected symbol.", sym.span).into();
+      }
+    };
+
+    Ok(ParserName {
+      name,
+      span: sym.span,
+    })
+  }
+}
+
+impl Display for ParserName {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.name)
   }
 }
 
@@ -389,6 +434,10 @@ impl ProductionName {
 
   pub fn span(&self) -> Span {
     self.span
+  }
+
+  pub fn type_spec_as_type(&self) -> syn::Type {
+    self.type_spec.clone().unwrap_or(Type::unit()).as_type()
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(
@@ -742,17 +791,23 @@ impl Display for ProductionRule {
 
 #[derive(Clone, Debug)]
 pub struct Constructor {
-  pub tokens: TokenStream,
+  pub group: proc_macro::Group,
   span: Span,
 }
 
 impl Constructor {
-  fn new(tokens: TokenStream, span: Span) -> Self {
-    Self { tokens, span }
+  fn new(group: proc_macro::Group, span: Span) -> Self {
+    Self { group, span }
   }
 
   pub fn span(&self) -> Span {
     self.span
+  }
+}
+
+impl Display for Constructor {
+  fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "{}", self.group)
   }
 }
 
@@ -806,10 +861,10 @@ impl ProductionRules {
           }
           break;
         }
-        SymbolT::Group(tokens) => {
+        SymbolT::Group(group) => {
           constructor = Some(Constructor::new(
-            tokens.clone(),
-            iter_span(tokens.clone().into_iter().map(|token| token.span())),
+            group.clone(),
+            iter_span(group.stream().clone().into_iter().map(|token| token.span())),
           ));
 
           // consume the symbol
@@ -1032,6 +1087,7 @@ impl Display for Production {
 
 enum ParsedLine {
   Production(Production),
+  Name(ParserName),
   TerminalType(Type),
 }
 
@@ -1044,33 +1100,55 @@ fn parse_line<T: Iterator<Item = Symbol>>(
 
   match &sym.sym {
     SymbolT::Ident(ident) => {
-      if ident != "terminal" {
+      if ident == "terminal" {
+        // Consume the "terminal" ident.
+        iter.next();
+
+        expect_symbol!(
+          iter,
+          SymbolT::Op(Operator::Colon),
+          "Expected \":\" to follow \"terminal\" symbol.",
+          sym_span
+        );
+
+        let type_spec = Type::parse(iter)?;
+
+        expect_symbol!(
+          iter,
+          SymbolT::Op(Operator::Semicolon),
+          "Expected \";\" to follow terminal type.",
+          type_spec.span
+        );
+
+        Ok(ParsedLine::TerminalType(type_spec))
+      } else if ident == "name" {
+        // Consume the "name" ident.
+        iter.next();
+
+        expect_symbol!(
+          iter,
+          SymbolT::Op(Operator::Colon),
+          "Expected \":\" to follow \"name\" symbol.",
+          sym_span
+        );
+
+        let name = ParserName::parse(iter)?;
+
+        expect_symbol!(
+          iter,
+          SymbolT::Op(Operator::Semicolon),
+          "Expected \";\" to follow parser name.",
+          name.span
+        );
+
+        Ok(ParsedLine::Name(name))
+      } else {
         return ParseError::new(
-          "Expected either production rule or \"terminal\" symbol.",
+          "Expected either production rule, \"name\", or \"terminal\" symbol.",
           sym_span,
         )
         .into();
       }
-      // Consume the "terminal" ident.
-      iter.next();
-
-      expect_symbol!(
-        iter,
-        SymbolT::Op(Operator::Colon),
-        "Expected \":\" to follow \"terminal\" symbol.",
-        sym_span
-      );
-
-      let type_spec = Type::parse(iter)?;
-
-      expect_symbol!(
-        iter,
-        SymbolT::Op(Operator::Semicolon),
-        "Expected \";\" to follow terminal type.",
-        type_spec.span
-      );
-
-      Ok(ParsedLine::TerminalType(type_spec))
     }
     _ => Ok(ParsedLine::Production(Production::parse(iter, state)?)),
   }
@@ -1080,7 +1158,8 @@ fn parse_line<T: Iterator<Item = Symbol>>(
 pub struct Grammar {
   productions: HashMap<String, Rc<Production>>,
   start_rule: String,
-  terminal_type: Type,
+  pub parser_name: ParserName,
+  pub terminal_type: Type,
 }
 
 impl Grammar {
@@ -1093,6 +1172,7 @@ impl Grammar {
   pub fn from(token_stream: Vec<Symbol>) -> Self {
     let mut productions: HashMap<String, Rc<Production>> = HashMap::new();
     let mut parser_state = ParserState::new();
+    let mut parser_name = None;
     let mut terminal_type = None;
 
     let mut token_iter = token_stream.into_iter().peekable();
@@ -1108,6 +1188,14 @@ impl Grammar {
             }
           }
         }
+        Ok(ParsedLine::Name(name)) => match parser_name {
+          Some(_) => {
+            abort!(name.span, "Cannot have more than one parser name.");
+          }
+          None => {
+            parser_name = Some(name);
+          }
+        },
         Ok(ParsedLine::TerminalType(type_spec)) => match terminal_type {
           Some(_) => {
             abort!(type_spec.span, "Cannot have more than one terminal type.");
@@ -1122,17 +1210,25 @@ impl Grammar {
       }
     }
 
+    if parser_name.is_none() {
+      abort!(
+        Span::call_site(),
+        "Must give a name with a line \"name: <name>;\""
+      )
+    }
     if terminal_type.is_none() {
       abort!(
         Span::call_site(),
-        "Must define the terminal type with a line \"terminal: <type>\""
+        "Must define the terminal type with a line \"terminal: <type>;\""
       );
     }
+    let parser_name = parser_name.unwrap();
     let terminal_type = terminal_type.unwrap();
 
     let mut grammar = Self {
       productions,
       start_rule: "".to_string(),
+      parser_name,
       terminal_type,
     };
 
@@ -1235,6 +1331,7 @@ impl Grammar {
 
 impl Display for Grammar {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    write!(f, "name: {}\n", self.parser_name)?;
     write!(f, "terminal: {}\n", self.terminal_type)?;
     for (i, (_rule_name, rule)) in self.productions.iter().enumerate() {
       write!(f, "{}", rule)?;

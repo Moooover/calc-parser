@@ -77,7 +77,7 @@ pub enum SymbolT {
   // (chars). Ident's may also be terminals, depending on what is being parsed.
   Literal(String),
   // Groups are the blocks of code to execute in successful matches.
-  Group(TokenStream),
+  Group(proc_macro::Group),
   // Tuples are blocks of code within parenthesis.
   Tuple(TokenStream),
   // Arrays are for array slice types, i.e. &[u64].
@@ -146,7 +146,7 @@ impl Symbol {
         Group(group) => match group.delimiter() {
           Delimiter::Brace => {
             syms.push(Symbol::new(
-              SymbolT::Group(group.stream()),
+              SymbolT::Group(group.clone()),
               group.span(),
               token.into(),
             ));

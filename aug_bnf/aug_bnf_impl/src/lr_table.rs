@@ -1,5 +1,4 @@
 use proc_macro::Span;
-use proc_macro_error::abort;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -22,9 +21,9 @@ enum FirstCacheState {
 type ProductionFirstTable = HashMap<ProductionRuleRef, FirstCacheState>;
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct ProductionInst {
+pub struct ProductionInst {
   // A reference to a particular instance of a rule.
-  rule_ref: ProductionRuleRef,
+  pub rule_ref: ProductionRuleRef,
 }
 
 impl ProductionInst {
@@ -229,12 +228,12 @@ impl Display for PartialProductionState {
 /// i.e. `A -> b . C d`
 /// indicates that b has already been parsed, and we're ready to parse C d.
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct ProductionState {
-  inst: ProductionInst,
+pub struct ProductionState {
+  pub inst: ProductionInst,
   // Ranges from [0, rules.len()], and is the position of the dot.
-  pos: u32,
+  pub pos: u32,
   // The list of possible tokens that can follow this rule.
-  possible_lookaheads: BTreeSet<Terminal>,
+  pub possible_lookaheads: BTreeSet<Terminal>,
 }
 
 impl ProductionState {
@@ -318,8 +317,8 @@ impl Display for ProductionState {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
-struct LRStateBuilder {
-  states: BTreeSet<ProductionState>,
+pub struct LRStateBuilder {
+  pub states: BTreeSet<ProductionState>,
 }
 
 impl LRStateBuilder {
@@ -627,13 +626,20 @@ impl Display for Closure {
   }
 }
 
-enum LRTableEntry {
+pub enum LRTableEntry {
   Resolved(LRState),
   Unresolved(LRStateBuilder),
 }
 
 impl LRTableEntry {
-  fn state_builder_ref(&self) -> &LRStateBuilder {
+  pub fn lr_state(&self) -> &LRState {
+    match self {
+      LRTableEntry::Resolved(lr_state) => lr_state,
+      LRTableEntry::Unresolved(_) => unreachable!(),
+    }
+  }
+
+  pub fn state_builder_ref(&self) -> &LRStateBuilder {
     match self {
       LRTableEntry::Resolved(lr_state) => &lr_state.states,
       LRTableEntry::Unresolved(lr_state_builder) => lr_state_builder,
@@ -700,7 +706,7 @@ impl Display for Action {
   }
 }
 
-struct TransitionSet {
+pub struct TransitionSet {
   action_map: HashMap<Terminal, Action>,
   goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
 }
@@ -752,18 +758,24 @@ impl Display for TransitionSet {
   }
 }
 
-struct LRState {
-  states: LRStateBuilder,
-  transitions: TransitionSet,
+pub struct LRState {
+  pub states: LRStateBuilder,
+  pub transitions: TransitionSet,
+  pub uid: u64,
 }
 
 impl LRState {
-  pub fn new<I: Iterator<Item = ProductionState>>(states: I, transitions: TransitionSet) -> Self {
+  pub fn new<I: Iterator<Item = ProductionState>>(
+    states: I,
+    transitions: TransitionSet,
+    uid: u64,
+  ) -> Self {
     Self {
       states: LRStateBuilder {
         states: states.collect(),
       },
       transitions,
+      uid,
     }
   }
 }
@@ -791,8 +803,8 @@ impl Display for LRState {
 }
 
 pub struct LRTable {
-  states: HashSet<Rc<LRTableEntry>>,
-  initial_state: Rc<LRTableEntry>,
+  pub states: HashSet<Rc<LRTableEntry>>,
+  pub initial_state: Rc<LRTableEntry>,
 }
 
 impl LRTable {
@@ -800,6 +812,7 @@ impl LRTable {
     states: &mut HashSet<Rc<LRTableEntry>>,
     first_table: &mut ProductionFirstTable,
     lr_state_builder: &LRStateBuilder,
+    next_uid: &mut u64,
   ) -> ParseResult<Rc<LRTableEntry>> {
     let lr_table_entry = LRTableEntry::from(lr_state_builder.clone());
     if let Some(prior_lr_state) = states.get(&lr_table_entry) {
@@ -827,7 +840,8 @@ impl LRTable {
             .insert(term.clone(), Action::Reduce(prod_ref));
         }
         ActionBuilder::Shift(lr_state_builder) => {
-          let child_lr_state = Self::calculate_transitions(states, first_table, &lr_state_builder)?;
+          let child_lr_state =
+            Self::calculate_transitions(states, first_table, &lr_state_builder, next_uid)?;
           transition_set
             .action_map
             .insert(term.clone(), Action::Shift(child_lr_state));
@@ -836,7 +850,8 @@ impl LRTable {
     }
 
     for (prod_ref, lr_state_builder) in transitions.goto_map {
-      let child_lr_state = Self::calculate_transitions(states, first_table, &lr_state_builder)?;
+      let child_lr_state =
+        Self::calculate_transitions(states, first_table, &lr_state_builder, next_uid)?;
       transition_set.goto_map.insert(prod_ref, child_lr_state);
     }
 
@@ -846,8 +861,10 @@ impl LRTable {
         *Rc::get_mut_unchecked(&mut lr_state) = LRTableEntry::Resolved(LRState::new(
           lr_state_builder.states.clone().into_iter(),
           transition_set,
+          *next_uid,
         ));
       }
+      *next_uid += 1;
       states.insert(lr_state.clone());
     } else {
       return ParseError::new("Unexpected resolved LR table entry", Span::call_site()).into();
@@ -868,9 +885,14 @@ impl LRTable {
 
     let mut states = HashSet::new();
     let mut first_table = ProductionFirstTable::new();
+    let mut next_uid = 0u64;
 
-    let initial_state =
-      Self::calculate_transitions(&mut states, &mut first_table, &initial_lr_state)?;
+    let initial_state = Self::calculate_transitions(
+      &mut states,
+      &mut first_table,
+      &initial_lr_state,
+      &mut next_uid,
+    )?;
 
     Ok(Self {
       states,

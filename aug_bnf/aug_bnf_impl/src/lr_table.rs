@@ -739,6 +739,7 @@ impl Display for TransitionSet {
 pub struct LRState {
   pub states: LRStateBuilder,
   pub transitions: TransitionSet,
+  pub parent_states: HashSet<Rc<LRTableEntry>>,
   pub uid: u64,
 }
 
@@ -746,6 +747,7 @@ impl LRState {
   pub fn new<I: Iterator<Item = ProductionState>>(
     states: I,
     transitions: TransitionSet,
+    parent_states: HashSet<Rc<LRTableEntry>>,
     uid: u64,
   ) -> Self {
     Self {
@@ -753,6 +755,7 @@ impl LRState {
         states: states.collect(),
       },
       transitions,
+      parent_states,
       uid,
     }
   }
@@ -795,6 +798,7 @@ impl LRTable {
     states: &mut HashSet<Rc<LRTableEntry>>,
     first_table: &mut ProductionFirstTable,
     lr_state_builder: &LRStateBuilder,
+    parent_lr_state: Option<Rc<LRTableEntry>>,
     next_uid: &mut u64,
   ) -> ParseResult<Rc<LRTableEntry>> {
     let lr_table_entry = LRTableEntry::from(lr_state_builder.clone());
@@ -823,8 +827,13 @@ impl LRTable {
             .insert(term.clone(), Action::Reduce(prod_ref));
         }
         ActionBuilder::Shift(lr_state_builder) => {
-          let child_lr_state =
-            Self::calculate_transitions(states, first_table, &lr_state_builder, next_uid)?;
+          let child_lr_state = Self::calculate_transitions(
+            states,
+            first_table,
+            &lr_state_builder,
+            Some(lr_state.clone()),
+            next_uid,
+          )?;
           transition_set
             .action_map
             .insert(term.clone(), Action::Shift(child_lr_state));
@@ -833,17 +842,27 @@ impl LRTable {
     }
 
     for (prod_ref, lr_state_builder) in transitions.goto_map {
-      let child_lr_state =
-        Self::calculate_transitions(states, first_table, &lr_state_builder, next_uid)?;
+      let child_lr_state = Self::calculate_transitions(
+        states,
+        first_table,
+        &lr_state_builder,
+        Some(lr_state.clone()),
+        next_uid,
+      )?;
       transition_set.goto_map.insert(prod_ref, child_lr_state);
     }
 
     let mut lr_state = states.take(&lr_state).unwrap();
     if let LRTableEntry::Unresolved(lr_state_builder) = lr_state.deref() {
+      let mut parent_states = HashSet::new();
+      if let Some(parent_state) = parent_lr_state {
+        parent_states.insert(parent_state);
+      }
       unsafe {
         *Rc::get_mut_unchecked(&mut lr_state) = LRTableEntry::Resolved(LRState::new(
           lr_state_builder.states.clone().into_iter(),
           transition_set,
+          parent_states,
           *next_uid,
         ));
       }
@@ -874,6 +893,7 @@ impl LRTable {
       &mut states,
       &mut first_table,
       &initial_lr_state,
+      None,
       &mut next_uid,
     )?;
 

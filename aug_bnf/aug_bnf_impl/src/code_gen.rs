@@ -76,6 +76,13 @@ impl<'a> CodeGen<'a> {
     }
   }
 
+  fn unique_var(uid: usize) -> proc_macro2::TokenStream {
+    let ident = syn::Ident::new(&format!("v{}", uid), proc_macro2::Span::call_site());
+    quote! {
+      #ident
+    }
+  }
+
   fn generate_dfa_states(&self) -> proc_macro2::TokenStream {
     self
       .lr_table
@@ -117,39 +124,70 @@ impl<'a> CodeGen<'a> {
           }
           Action::Reduce(prod_rule_ref) => {
             let rules = &prod_rule_ref.rules().rules;
+            let mut parent_states = lr_state.parent_states.clone();
 
-            let var_builders =
-              rules
-                .iter()
-                .rev()
-                .fold(proc_macro2::TokenStream::new(), |tokens, prod_rule| {
-                  match prod_rule {
-                    ProductionRule::Intermediate(prod_ref) => {
-                      let prod = prod_ref.deref();
-                      // The type of values returned by constructors of this
-                      // production.
-                      let val_type = prod.name.type_spec_as_type();
+            let var_builders = rules.iter().enumerate().rev().fold(
+              proc_macro2::TokenStream::new(),
+              |tokens, (rule_idx, prod_rule)| {
+                let var_name = Self::unique_var(rule_idx);
+                parent_states = LRState::parents_of(&parent_states);
 
-                      // TODO next: figure out which enum variant this should be
+                // TODO next: figure out which enum variant this should be
+                let val_extraction_assignment = if parent_states
+                  .iter()
+                  .all(|lr_state| lr_state.lr_state().is_initial_state())
+                {
+                  quote! {}
+                } else {
+                  let variants = parent_states.iter().fold(
+                    proc_macro2::TokenStream::new(),
+                    |tokens, lr_state| {
+                      let lr_state = lr_state.lr_state();
+                      let enum_inst = self.to_enum_inst(lr_state);
+
                       quote! {
-                        match states.pop() {
-                          Some()
-                        }
+                        #tokens
+                        #enum_inst(val) => val,
                       }
-                    }
-                    ProductionRule::Terminal(term) => {
-                      // TODO capture terminals too, either with $<index> or aliases
-                      quote! {
-                        states.pop();
-                      }
-                    }
+                    },
+                  );
+
+                  quote! {
+                    let #var_name = match states.pop() {
+                      #variants
+                      _ => unreachable!(),
+                    };
                   }
-                });
+                };
+
+                match prod_rule {
+                  ProductionRule::Intermediate(prod_ref) => {
+                    let prod = prod_ref.deref();
+
+                    // The type of values returned by constructors of this
+                    // production.
+                    let val_type = prod.name.type_spec_as_type();
+                  }
+                  ProductionRule::Terminal(term) => {
+                    // TODO capture terminals too, either with $<index> or aliases
+                  }
+                }
+
+                quote! {
+                  #tokens
+                  #val_extraction_assignment
+                }
+              },
+            );
+
+            // TODO: get from prod_rule_ref to prod_ref, push the goto state
+            // let goto_state = lr_state.transitions.goto_map.get();
 
             quote! {
               #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Got to this guy!");
+                #var_builders
                 return None;
               }
             }

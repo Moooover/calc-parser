@@ -760,9 +760,22 @@ impl LRState {
     }
   }
 
+  pub fn parents_of(lr_states: &HashSet<Rc<LRTableEntry>>) -> HashSet<Rc<LRTableEntry>> {
+    lr_states
+      .iter()
+      .fold(HashSet::new(), |mut parent_states, lr_state| {
+        parent_states.extend(lr_state.lr_state().parent_states.clone());
+        parent_states
+      })
+  }
+
   pub fn last_sym(&self) -> Option<&ProductionRule> {
     let repr_state = self.states.states.iter().next().unwrap();
     repr_state.prev_sym()
+  }
+
+  pub fn is_initial_state(&self) -> bool {
+    self.parent_states.is_empty()
   }
 }
 

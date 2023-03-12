@@ -623,6 +623,12 @@ impl LRTableEntry {
       LRTableEntry::Unresolved(lr_state_builder) => lr_state_builder,
     }
   }
+
+  pub fn as_parent_set(lr_entry_ptr: &Rc<LRTableEntry>) -> HashSet<Rc<LRTableEntry>> {
+    let mut parent_set = HashSet::new();
+    parent_set.insert(lr_entry_ptr.clone());
+    return parent_set;
+  }
 }
 
 impl From<LRStateBuilder> for LRTableEntry {
@@ -715,7 +721,7 @@ impl Display for TransitionSet {
       first = false;
       write!(
         f,
-        "{} -> goto {}",
+        "<{}> -> goto({})",
         prod_ref.name(),
         match lr_table_entry.deref() {
           LRTableEntry::Resolved(lr_state) => {

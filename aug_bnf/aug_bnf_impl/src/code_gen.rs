@@ -1,7 +1,8 @@
 use quote::quote;
 
-use crate::lr_table::{Action, LRState, LRTable};
+use crate::lr_table::{Action, LRState, LRTable, LRTableEntry};
 use crate::production::{Grammar, ProductionRule};
+use std::rc::Rc;
 
 struct CodeGen<'a> {
   grammar: &'a Grammar,
@@ -31,6 +32,25 @@ impl<'a> CodeGen<'a> {
       terminal_type,
       root_type,
     }
+  }
+
+  fn final_enum_variant_no_prefix(&self) -> proc_macro2::TokenStream {
+    let table_result_type = self
+      .lr_table
+      .initial_state
+      .lr_state()
+      .states
+      .states
+      .iter()
+      .nth(0)
+      .unwrap()
+      .inst
+      .rule_ref
+      .prod_ref()
+      .deref()
+      .name
+      .type_spec_as_type();
+    quote! { T(#table_result_type) }
   }
 
   fn to_enum_variant_no_prefix(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
@@ -84,11 +104,16 @@ impl<'a> CodeGen<'a> {
   }
 
   fn generate_dfa_states(&self) -> proc_macro2::TokenStream {
+    let final_state = self.final_enum_variant_no_prefix();
+    let states = quote! {
+      #final_state,
+    };
+
     self
       .lr_table
       .states
       .iter()
-      .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
+      .fold(states, |tokens, lr_entry| {
         let lr_state = lr_entry.lr_state();
         let dfa_state = self.to_enum_variant_no_prefix(lr_state);
         quote! {
@@ -98,8 +123,11 @@ impl<'a> CodeGen<'a> {
       })
   }
 
-  fn generate_dfa_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+  fn generate_dfa_transitions(&self, lr_entry: &Rc<LRTableEntry>) -> proc_macro2::TokenStream {
+    let lr_state = lr_entry.lr_state();
     let enum_variant = self.to_enum_variant(lr_state);
+
+    eprintln!("state: {} ({})", lr_state, enum_variant);
 
     lr_state.transitions.action_map.iter().fold(
       proc_macro2::TokenStream::new(),
@@ -119,67 +147,64 @@ impl<'a> CodeGen<'a> {
                 // Consume the token.
                 input_stream.next();
                 states.push(#next_state(#sym_tokens));
-
-                // Don't fall through to the goto map, have to explicitly
-                // continue.
-                continue;
               }
             }
           }
           Action::Reduce(prod_rule_ref) => {
             let rules = &prod_rule_ref.rules().rules;
-            let mut parent_states = lr_state.parent_states.clone();
+            let mut parent_states = LRTableEntry::as_parent_set(lr_entry);
 
+            // For each of the states consumed by this rule, place them in a
+            // unique variable indexed by the rule index corresponding to the
+            // state consumed.
             let var_builders = rules.iter().enumerate().rev().fold(
               proc_macro2::TokenStream::new(),
               |tokens, (rule_idx, prod_rule)| {
                 let var_name = Self::unique_var(rule_idx);
+                let x = prod_rule.to_string();
+                let y = prod_rule_ref.rules().to_string();
 
-                let val_extraction_assignment = if parent_states
-                  .iter()
-                  .all(|lr_state| lr_state.lr_state().is_initial_state())
-                {
-                  quote! {}
-                } else {
-                  let variants = parent_states.iter().fold(
-                    proc_macro2::TokenStream::new(),
-                    |tokens, lr_state| {
+                // States can be reached via multiple paths through the dfa if
+                // they or their ancestors were merged, so we need to match
+                // against every possible state that each rule could have been
+                // from.
+                let variants =
+                  parent_states
+                    .iter()
+                    .fold(proc_macro2::TokenStream::new(), |tokens, lr_state| {
                       let lr_state = lr_state.lr_state();
                       let enum_inst = self.to_enum_inst(lr_state);
 
                       quote! {
                         #tokens
-                        Some(#enum_inst(val)) => val,
+                        Some(#enum_inst(val)) => {
+                          println!("{}, {}", #x, #y);
+                          val
+                        }
                       }
-                    },
-                  );
+                    });
 
-                  quote! {
-                    let #var_name = match states.pop() {
-                      #variants
-                      _ => unreachable!(),
-                    };
-                  }
-                };
+                // match prod_rule {
+                //   ProductionRule::Intermediate(prod_ref) => {
+                //     let prod = prod_ref.deref();
 
-                match prod_rule {
-                  ProductionRule::Intermediate(prod_ref) => {
-                    let prod = prod_ref.deref();
-
-                    // The type of values returned by constructors of this
-                    // production.
-                    let val_type = prod.name.type_spec_as_type();
-                  }
-                  ProductionRule::Terminal(term) => {
-                    // TODO capture terminals too, either with $<index> or aliases
-                  }
-                }
+                //     // The type of values returned by constructors of this
+                //     // production.
+                //     let val_type = prod.name.type_spec_as_type();
+                //   }
+                //   ProductionRule::Terminal(term) => {
+                //     // TODO capture terminals too, either with $<index> or aliases
+                //   }
+                // }
 
                 parent_states = LRState::parents_of(&parent_states);
 
                 quote! {
                   #tokens
-                  #val_extraction_assignment
+                  let #var_name = match states.pop() {
+                    #variants
+                    _ => unreachable!(),
+                  };
                 }
               },
             );
@@ -187,12 +212,73 @@ impl<'a> CodeGen<'a> {
             // TODO: get from prod_rule_ref to prod_ref, push the goto state
             // let goto_state = lr_state.transitions.goto_map.get();
 
+            // Construct either the goto switch, or the return statement if
+            // this is the initial state being completed.
+            let goto_or_return = if parent_states
+              .iter()
+              .all(|lr_entry_ptr| lr_entry_ptr.lr_state().is_initial_state())
+            {
+              // If all parent states are the initial state, then we can return
+              // the constructed value, if the input stream is empty.
+              quote! {
+                if input_stream.peek().is_some() {
+                  return None;
+                }
+                return Some(cons);
+              }
+            } else {
+              let goto_transitions = parent_states.iter().fold(
+                proc_macro2::TokenStream::new(),
+                |tokens, lr_entry_ptr| {
+                  let parent_lr_state = lr_entry_ptr.lr_state();
+                  let parent_enum_variant = self.to_enum_variant(parent_lr_state);
+
+                  let next_lr_entry_ptr = parent_lr_state
+                    .transitions
+                    .goto_map
+                    .get(prod_rule_ref.prod_ref());
+                  if next_lr_entry_ptr.is_none() {
+                    // The only way there can exist no parent states is if this
+                    // is the initial production rule, meaning we only have to
+                    // check that the input stream is empty.
+                    eprintln!(
+                      "Ruh roh! {} => {} ({})",
+                      lr_entry_ptr, lr_entry, prod_rule_ref
+                    );
+                    unreachable!();
+                  }
+                  let next_lr_state = next_lr_entry_ptr.unwrap().lr_state();
+                  let next_enum_variant = self.to_enum_inst(next_lr_state);
+
+                  quote! {
+                    #tokens
+                    Some(#parent_enum_variant) => {
+                      states.push(#next_enum_variant(cons));
+                    }
+                  }
+                },
+              );
+
+              quote! {
+                match states.pop() {
+                  #goto_transitions
+                  _ => unreachable!(),
+                }
+              }
+            };
+
+            eprintln!("{}", goto_or_return.to_string());
+
             quote! {
               #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Got to this guy!");
                 #var_builders
-                return None;
+
+                // TODO construct the variant
+                let cons = 0;
+
+                #goto_or_return
               }
             }
           }
@@ -201,19 +287,19 @@ impl<'a> CodeGen<'a> {
     )
   }
 
-  fn generate_goto_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
-    let enum_variant = self.to_enum_variant(lr_state);
+  // fn generate_goto_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+  //   let enum_variant = self.to_enum_variant(lr_state);
 
-    lr_state.transitions.goto_map.iter().fold(
-      proc_macro2::TokenStream::new(),
-      |tokens, (prod_ref, lr_table_entry_ptr)| {
-        // todo!();
-        quote! {
-          #tokens
-        }
-      },
-    )
-  }
+  //   lr_state.transitions.goto_map.iter().fold(
+  //     proc_macro2::TokenStream::new(),
+  //     |tokens, (prod_ref, lr_table_entry_ptr)| {
+  //       quote! {
+  //         #tokens
+  //         (#enum_variant(_), )
+  //       }
+  //     },
+  //   )
+  // }
 
   fn generate_match_loop(&self) -> proc_macro2::TokenStream {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
@@ -223,26 +309,13 @@ impl<'a> CodeGen<'a> {
         .states
         .iter()
         .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
-          let lr_state = lr_entry.lr_state();
-          let dfa_state = self.generate_dfa_transitions(lr_state);
+          let dfa_state = self.generate_dfa_transitions(lr_entry);
           quote! {
             #dfa_state,
             #tokens
           }
         });
-    let goto_transitions =
-      self
-        .lr_table
-        .states
-        .iter()
-        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
-          let lr_state = lr_entry.lr_state();
-          let goto_transitions = self.generate_goto_transitions(lr_state);
-          quote! {
-            #goto_transitions
-            #tokens
-          }
-        });
+    eprintln!("{}", state_transitions.to_string());
 
     quote! {
       let mut states = vec![#initial_state];
@@ -250,7 +323,7 @@ impl<'a> CodeGen<'a> {
         let state = states.last().unwrap();
         let next_token = input_stream.peek();
 
-        let resolved_rule = match (state, next_token) {
+        match (state, next_token) {
           #state_transitions
           _ => {
             match next_token {
@@ -263,13 +336,6 @@ impl<'a> CodeGen<'a> {
             }
             return None;
           }
-        };
-
-        let state = states.last().unwrap();
-
-        match (state, resolved_rule) {
-          #goto_transitions
-          _ => unreachable!(),
         }
       }
     }

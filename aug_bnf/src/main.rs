@@ -523,7 +523,9 @@ fn main() {
     <S>: u32 => 'z' <A> 'w' {
       2 * 4
     };
-    <A> => 'a';
+    <A>: bool => 'a' {
+      true
+    };
   }
 
   let x = vec!['x', 'a', 'y'];

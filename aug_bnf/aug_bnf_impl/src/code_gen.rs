@@ -287,20 +287,6 @@ impl<'a> CodeGen<'a> {
     )
   }
 
-  // fn generate_goto_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
-  //   let enum_variant = self.to_enum_variant(lr_state);
-
-  //   lr_state.transitions.goto_map.iter().fold(
-  //     proc_macro2::TokenStream::new(),
-  //     |tokens, (prod_ref, lr_table_entry_ptr)| {
-  //       quote! {
-  //         #tokens
-  //         (#enum_variant(_), )
-  //       }
-  //     },
-  //   )
-  // }
-
   fn generate_match_loop(&self) -> proc_macro2::TokenStream {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
     let state_transitions =
@@ -372,30 +358,5 @@ impl<'a> CodeGen<'a> {
 }
 
 pub fn to_match_loop(grammar: &Grammar, lr_table: &LRTable) -> proc_macro2::TokenStream {
-  // let l = format!("{}", lr_table);
-  let code_gen = CodeGen::new(grammar, lr_table);
-
-  return code_gen.generate();
-
-  // 'outer: for lr_table_entry in &lr_table.states {
-  //   for state in &lr_table_entry.state_builder_ref().states {
-  //     v.push(format!("{}", state.inst.rule_ref));
-  //     if state.inst.rule_ref.rules().constructor.as_ref().is_some() {
-  //       let x: syn::Result<syn::ExprBlock> = parse(
-  //         proc_macro::TokenTree::Group(
-  //           state
-  //             .inst
-  //             .rule_ref
-  //             .rules()
-  //             .constructor
-  //             .as_ref()
-  //             .unwrap()
-  //             .group
-  //             .clone(),
-  //         )
-  //         .into(),
-  //       );
-  //     }
-  //   }
-  // }
+  CodeGen::new(grammar, lr_table).generate()
 }

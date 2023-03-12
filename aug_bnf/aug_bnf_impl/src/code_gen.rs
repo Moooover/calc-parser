@@ -119,6 +119,10 @@ impl<'a> CodeGen<'a> {
                 // Consume the token.
                 input_stream.next();
                 states.push(#next_state(#sym_tokens));
+
+                // Don't fall through to the goto map, have to explicitly
+                // continue.
+                continue;
               }
             }
           }
@@ -130,9 +134,7 @@ impl<'a> CodeGen<'a> {
               proc_macro2::TokenStream::new(),
               |tokens, (rule_idx, prod_rule)| {
                 let var_name = Self::unique_var(rule_idx);
-                parent_states = LRState::parents_of(&parent_states);
 
-                // TODO next: figure out which enum variant this should be
                 let val_extraction_assignment = if parent_states
                   .iter()
                   .all(|lr_state| lr_state.lr_state().is_initial_state())
@@ -147,7 +149,7 @@ impl<'a> CodeGen<'a> {
 
                       quote! {
                         #tokens
-                        #enum_inst(val) => val,
+                        Some(#enum_inst(val)) => val,
                       }
                     },
                   );
@@ -173,6 +175,8 @@ impl<'a> CodeGen<'a> {
                   }
                 }
 
+                parent_states = LRState::parents_of(&parent_states);
+
                 quote! {
                   #tokens
                   #val_extraction_assignment
@@ -197,6 +201,20 @@ impl<'a> CodeGen<'a> {
     )
   }
 
+  fn generate_goto_transitions(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+    let enum_variant = self.to_enum_variant(lr_state);
+
+    lr_state.transitions.goto_map.iter().fold(
+      proc_macro2::TokenStream::new(),
+      |tokens, (prod_ref, lr_table_entry_ptr)| {
+        // todo!();
+        quote! {
+          #tokens
+        }
+      },
+    )
+  }
+
   fn generate_match_loop(&self) -> proc_macro2::TokenStream {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
     let state_transitions =
@@ -212,6 +230,19 @@ impl<'a> CodeGen<'a> {
             #tokens
           }
         });
+    let goto_transitions =
+      self
+        .lr_table
+        .states
+        .iter()
+        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
+          let lr_state = lr_entry.lr_state();
+          let goto_transitions = self.generate_goto_transitions(lr_state);
+          quote! {
+            #goto_transitions
+            #tokens
+          }
+        });
 
     quote! {
       let mut states = vec![#initial_state];
@@ -219,7 +250,7 @@ impl<'a> CodeGen<'a> {
         let state = states.last().unwrap();
         let next_token = input_stream.peek();
 
-        match (state, next_token) {
+        let resolved_rule = match (state, next_token) {
           #state_transitions
           _ => {
             match next_token {
@@ -232,6 +263,13 @@ impl<'a> CodeGen<'a> {
             }
             return None;
           }
+        };
+
+        let state = states.last().unwrap();
+
+        match (state, resolved_rule) {
+          #goto_transitions
+          _ => unreachable!(),
         }
       }
     }

@@ -612,7 +612,7 @@ impl ProductionRef {
   pub fn rule_ref(&self, rule_idx: u32) -> ProductionRuleRef {
     debug_assert!((rule_idx as usize) < self.deref().rules().len());
     ProductionRuleRef::new(
-      self.deref(),
+      self.clone(),
       rule_idx,
       self.deref().rules().get(rule_idx as usize).unwrap().span,
     )
@@ -951,17 +951,22 @@ impl Display for ProductionRules {
 }
 
 /// ProductionRuleRef is a reference to a particular instance of a rule.
+///
+/// Since these are only used in external code, and are not a part of the
+/// grammar graph, we also take a strong reference to the Production.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProductionRuleRef {
+  prod_ref: ProductionRef,
   prod_ptr: Rc<Production>,
   rule_idx: u32,
   span: TransparentSpan,
 }
 
 impl ProductionRuleRef {
-  fn new(prod_ref: Rc<Production>, rule_idx: u32, span: Span) -> Self {
+  fn new(prod_ref: ProductionRef, rule_idx: u32, span: Span) -> Self {
     Self {
-      prod_ptr: prod_ref,
+      prod_ptr: prod_ref.deref(),
+      prod_ref,
       rule_idx,
       span: span.into(),
     }
@@ -975,6 +980,10 @@ impl ProductionRuleRef {
     self.span.span
   }
 
+  pub fn prod_ref(&self) -> &ProductionRef {
+    &self.prod_ref
+  }
+
   pub fn rules(&self) -> &ProductionRules {
     self.prod_ptr.rules().get(self.rule_idx as usize).unwrap()
   }
@@ -982,12 +991,7 @@ impl ProductionRuleRef {
 
 impl Display for ProductionRuleRef {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    write!(
-      f,
-      "<{}> => {}",
-      self.prod_ptr.name(),
-      self.prod_ptr.rules().get(self.rule_idx as usize).unwrap(),
-    )
+    write!(f, "<{}> => {}", self.name(), self.rules())
   }
 }
 

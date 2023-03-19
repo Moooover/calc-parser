@@ -20,26 +20,8 @@ use symbol::Symbol;
 pub fn grammar_def(tokens: TokenStream) -> TokenStream {
   let list = Symbol::from_stream(tokens);
   let grammar = Grammar::from(list);
-  // let s = format!("{}", grammar);
   let lr_table = LRTable::from_grammar(&grammar).unwrap_or_else(|err| err.raise());
   eprintln!("{}", lr_table);
   let syn_tree = code_gen::to_match_loop(&grammar, &lr_table).unwrap_or_else(|err| err.raise());
   return syn_tree.into();
-
-  // return TokenStream::from(quote! {
-  //   let var1 = #s;
-  //   let var2 = #l;
-  //   println!("{}", var1);
-  //   println!("{}", var2);
-  // });
-
-  // let token_stream = list.iter().map(|sym| {
-  //   let s = format!("{}", sym);
-  //   let p = quote_spanned!(sym.span.into()=>
-  //     println!
-  //   );
-  //   quote! {
-  //     #p("sym: {}", #s);
-  //   }
-  // });
 }

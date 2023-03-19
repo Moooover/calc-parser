@@ -175,7 +175,7 @@ impl<'a> CodeGen<'a> {
     quote! { T(#table_result_type) }
   }
 
-  fn to_enum_variant_no_prefix(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+  fn to_enum_variant_typed_no_prefix(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
     let lr_state_name = syn::Ident::new(
       &format!("S{}", lr_state.uid),
       proc_macro2::Span::call_site(),
@@ -191,6 +191,23 @@ impl<'a> CodeGen<'a> {
       let state = state.unwrap();
       quote! {
         #lr_state_name(#state)
+      }
+    } else {
+      quote! {
+        #lr_state_name
+      }
+    }
+  }
+
+  fn to_enum_variant_no_prefix(&self, lr_state: &LRState) -> proc_macro2::TokenStream {
+    let lr_state_name = syn::Ident::new(
+      &format!("S{}", lr_state.uid),
+      proc_macro2::Span::call_site(),
+    );
+
+    if lr_state.last_sym().is_some() {
+      quote! {
+        #lr_state_name(_)
       }
     } else {
       quote! {
@@ -237,7 +254,7 @@ impl<'a> CodeGen<'a> {
       .iter()
       .fold(states, |tokens, lr_entry| {
         let lr_state = lr_entry.lr_state();
-        let dfa_state = self.to_enum_variant_no_prefix(lr_state);
+        let dfa_state = self.to_enum_variant_typed_no_prefix(lr_state);
         quote! {
           #dfa_state,
           #tokens
@@ -275,7 +292,7 @@ impl<'a> CodeGen<'a> {
               }
             })
           }
-          Action::Reduce(prod_rule_ref) => {
+          Action::Reduce(prod_rule_ref) | Action::Terminate(prod_rule_ref) => {
             let rules = &prod_rule_ref.rules().rules;
             let mut parent_states = LRTableEntry::as_parent_set(lr_entry);
 
@@ -322,12 +339,9 @@ impl<'a> CodeGen<'a> {
 
             // Construct either the goto switch, or the return statement if
             // this is the initial state being completed.
-            let goto_or_return = if parent_states
-              .iter()
-              .all(|lr_entry_ptr| lr_entry_ptr.lr_state().is_initial_state())
-            {
-              // If all parent states are the initial state, then we can return
-              // the constructed value, if the input stream is empty.
+            let goto_or_return = if let Action::Terminate(_) = action {
+              // If this is a terminate action, then we can return the
+              // constructed value, if the input stream is empty.
               quote! {
                 if input_stream.peek().is_some() {
                   return None;
@@ -434,6 +448,7 @@ impl<'a> CodeGen<'a> {
           print!("{:?} ", s);
         }
         println!("");
+        println!("Matching ({:?}, {:?})", state, next_token);
 
         match (state, next_token) {
           #state_transitions

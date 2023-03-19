@@ -646,3 +646,11 @@ fn main() {
   }
   */
 }
+
+// Regexes:
+// ::std::io::_(e?)print\([\s\r]*format_args!\([\s\r]*(.+)[\s\r]*\)[\s\r]*\);
+// $1print!($2);
+// ::core::panicking::panic\("internal error: entered unreachable code"\)
+// unreachable!()
+// <\[_\]>::into_vec\([\s\r]*#\[rustc_box\][\s\r]*::alloc::boxed::Box::new\((\[[^\]]+\])\),[\s\r]*\)
+// vec!$1

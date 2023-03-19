@@ -144,8 +144,11 @@ impl<'a> PartialProductionState {
     }
   }
 
-  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) {
-    self.possible_lookaheads.extend(lookaheads)
+  /// Returns true if this state changed with this operation.
+  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) -> bool {
+    let prev_n_possible_lookaheads = self.possible_lookaheads.len();
+    self.possible_lookaheads.extend(lookaheads);
+    prev_n_possible_lookaheads != self.possible_lookaheads.len()
   }
 
   fn from_production<I: Iterator<Item = Terminal>>(
@@ -346,6 +349,7 @@ impl Display for LRStateBuilder {
 enum ActionBuilder {
   Shift(LRStateBuilder),
   Reduce(ProductionRuleRef),
+  Terminate(ProductionRuleRef),
 }
 
 impl Display for ActionBuilder {
@@ -365,6 +369,9 @@ impl Display for ActionBuilder {
       }
       ActionBuilder::Reduce(prod_rule_ref) => {
         write!(f, "reduce({})", prod_rule_ref)
+      }
+      ActionBuilder::Terminate(prod_rule_ref) => {
+        write!(f, "terminate({})", prod_rule_ref)
       }
     }
   }
@@ -398,6 +405,14 @@ impl TransitionSetBuilder {
         prod_state.inst.rule_ref.span(),
       )
       .into(),
+      Some(ActionBuilder::Terminate(prod_ref)) => ParseError::new(
+        &format!(
+          "Shift/reduce conflict for rules {} (shift) and {} (terminate)",
+          prod_state.inst.rule_ref, prod_ref
+        ),
+        prod_state.inst.rule_ref.span(),
+      )
+      .into(),
       None => {
         let mut lr_state = LRStateBuilder::new();
         lr_state.insert(prod_state);
@@ -425,10 +440,46 @@ impl TransitionSetBuilder {
         prod_rule_ref.span(),
       )
       .into(),
+      Some(ActionBuilder::Terminate(other_prod_rule_ref)) => ParseError::new(
+        &format!(
+          "Reduce/reduce conflict for rules {} and {} (terminate)",
+          prod_rule_ref, other_prod_rule_ref
+        ),
+        prod_rule_ref.span(),
+      )
+      .into(),
       None => {
         self
           .action_map
           .insert(term, ActionBuilder::Reduce(prod_rule_ref));
+        Ok(())
+      }
+    }
+  }
+
+  fn insert_terminate(&mut self, term: Terminal, prod_rule_ref: ProductionRuleRef) -> ParseResult {
+    match self.action_map.get_mut(&term) {
+      Some(action @ ActionBuilder::Shift(_)) => ParseError::new(
+        &format!(
+          "Shift/reduce conflict for rules {} (shift) and {} (terminate)",
+          action, prod_rule_ref
+        ),
+        prod_rule_ref.span(),
+      )
+      .into(),
+      Some(ActionBuilder::Reduce(other_prod_rule_ref)) => ParseError::new(
+        &format!(
+          "Reduce/reduce conflict for rules {} (terminate) and {}",
+          prod_rule_ref, other_prod_rule_ref
+        ),
+        prod_rule_ref.span(),
+      )
+      .into(),
+      Some(ActionBuilder::Terminate(_)) => Ok(()),
+      None => {
+        self
+          .action_map
+          .insert(term, ActionBuilder::Terminate(prod_rule_ref));
         Ok(())
       }
     }
@@ -511,15 +562,17 @@ impl Closure {
     );
 
     // TODO fix closure calc: missing lookaheads for recursive rules for some reason.
-    while let Some(state) = queue.pop_front() {
+    while let Some(mut state) = queue.pop_front() {
       if let Some(mut prod_state) = expanded_rules.take(&state) {
         // If this rule has already been expanded, we just need to merge
         // the possible lookaheads discovered from this expansion.
-        prod_state.merge_lookaheads(state.possible_lookaheads.clone().into_iter());
-        expanded_rules.insert(prod_state);
+        if !prod_state.merge_lookaheads(state.possible_lookaheads.clone().into_iter()) {
+          // If the state didn't change, we don't have to re-expand the next symbol.
+          expanded_rules.insert(prod_state);
+          continue;
+        }
 
-        // Don't re-expand the next symbol of this rule.
-        continue;
+        state = prod_state;
       }
 
       // If the rule wasn't found in the map, we need to add it and expand the
@@ -530,9 +583,6 @@ impl Closure {
         match state.next_sym() {
           Some(ProductionRule::Intermediate(production)) => {
             let prod = production.deref();
-            // Don't expand rules that have already been expanded, or recursive
-            // references to this rule.
-            // if prod.name != state.inst.name && !expanded_rules.contains(&prod.name) {
             let mut next_terms = state.inst.calculate_first_set(state.pos + 1, first_cache);
 
             // If next_terms includes epsilon, the rest of this state is
@@ -549,9 +599,6 @@ impl Closure {
         }
       }
     }
-    // for prod in &expanded_rules {
-    //   eprintln!("prod: {}", prod);
-    // }
 
     return Self {
       states: expanded_rules
@@ -563,14 +610,24 @@ impl Closure {
 
   /// Computes the set of actions that can be taken from this state, and the
   /// list of production states that each action would yield.
-  fn transitions(&self) -> ParseResult<TransitionSetBuilder> {
+  fn transitions(&self, grammar: &Grammar) -> ParseResult<TransitionSetBuilder> {
     let mut transitions = TransitionSetBuilder::new();
 
     for state in &self.states {
       if state.is_complete() {
         // Completed states can be reduced.
         for term in &state.possible_lookaheads {
-          transitions.insert_reduce(term.clone(), state.inst.rule_ref.clone())?;
+          eprintln!(
+            "namez: {} vs {} ({})",
+            grammar.starting_rule().name(),
+            state.inst.rule_ref.prod_ref().name(),
+            grammar.is_starting_rule(state.inst.rule_ref.prod_ref())
+          );
+          if grammar.is_starting_rule(state.inst.rule_ref.prod_ref()) {
+            transitions.insert_terminate(term.clone(), state.inst.rule_ref.clone())?;
+          } else {
+            transitions.insert_reduce(term.clone(), state.inst.rule_ref.clone())?;
+          }
         }
 
         continue;
@@ -587,7 +644,7 @@ impl Closure {
       }
     }
 
-    // eprintln!("{}", transitions);
+    eprintln!("transitionz: {}", transitions);
 
     Ok(transitions)
   }
@@ -612,6 +669,13 @@ pub enum LRTableEntry {
 
 impl LRTableEntry {
   pub fn lr_state(&self) -> &LRState {
+    match self {
+      LRTableEntry::Resolved(lr_state) => lr_state,
+      LRTableEntry::Unresolved(_) => unreachable!(),
+    }
+  }
+
+  fn lr_state_mut(&mut self) -> &mut LRState {
     match self {
       LRTableEntry::Resolved(lr_state) => lr_state,
       LRTableEntry::Unresolved(_) => unreachable!(),
@@ -665,6 +729,7 @@ impl Display for LRTableEntry {
 pub enum Action {
   Shift(Rc<LRTableEntry>),
   Reduce(ProductionRuleRef),
+  Terminate(ProductionRuleRef),
 }
 
 impl Display for Action {
@@ -687,6 +752,7 @@ impl Display for Action {
         }
       ),
       Action::Reduce(prod_rule_ref) => write!(f, "reduce({})", prod_rule_ref.name()),
+      Action::Terminate(prod_rule_ref) => write!(f, "terminate({})", prod_rule_ref.name()),
     }
   }
 }
@@ -767,6 +833,10 @@ impl LRState {
     }
   }
 
+  fn add_parent(&mut self, parent: Rc<LRTableEntry>) {
+    self.parent_states.insert(parent);
+  }
+
   pub fn parents_of(lr_states: &HashSet<Rc<LRTableEntry>>) -> HashSet<Rc<LRTableEntry>> {
     lr_states
       .iter()
@@ -816,17 +886,23 @@ pub struct LRTable {
 impl LRTable {
   fn calculate_transitions(
     states: &mut HashSet<Rc<LRTableEntry>>,
+    grammar: &Grammar,
     first_table: &mut ProductionFirstTable,
     lr_state_builder: &LRStateBuilder,
     parent_lr_state: Option<Rc<LRTableEntry>>,
     next_uid: &mut u64,
   ) -> ParseResult<Rc<LRTableEntry>> {
     let lr_table_entry = LRTableEntry::from(lr_state_builder.clone());
-    if let Some(prior_lr_state) = states.get(&lr_table_entry) {
-      return Ok(prior_lr_state.clone());
-    }
-    if states.len() % 100 == 0 {
-      eprintln!("states: {}", states.len());
+    if let Some(mut prior_lr_state) = states.take(&lr_table_entry) {
+      if let Some(parent_state) = parent_lr_state {
+        unsafe {
+          Rc::get_mut_unchecked(&mut prior_lr_state)
+            .lr_state_mut()
+            .add_parent(parent_state);
+        }
+      }
+      states.insert(prior_lr_state.clone());
+      return Ok(prior_lr_state);
     }
     // eprintln!("line: {}", lr_state_builder);
 
@@ -834,21 +910,17 @@ impl LRTable {
     assert!(states.insert(lr_state.clone()));
 
     let closure = Closure::from_lr_states(lr_state_builder, first_table);
-    // eprintln!("\tclozure: {}", closure);
-    let transitions = closure.transitions()?;
+    eprintln!("\tclozure: {}", closure);
+    let transitions = closure.transitions(grammar)?;
 
     let mut transition_set = TransitionSet::new();
 
     for (term, action_builder) in transitions.action_map {
       match action_builder {
-        ActionBuilder::Reduce(prod_ref) => {
-          transition_set
-            .action_map
-            .insert(term.clone(), Action::Reduce(prod_ref));
-        }
         ActionBuilder::Shift(lr_state_builder) => {
           let child_lr_state = Self::calculate_transitions(
             states,
+            grammar,
             first_table,
             &lr_state_builder,
             Some(lr_state.clone()),
@@ -858,12 +930,23 @@ impl LRTable {
             .action_map
             .insert(term.clone(), Action::Shift(child_lr_state));
         }
+        ActionBuilder::Reduce(prod_ref) => {
+          transition_set
+            .action_map
+            .insert(term.clone(), Action::Reduce(prod_ref));
+        }
+        ActionBuilder::Terminate(prod_ref) => {
+          transition_set
+            .action_map
+            .insert(term.clone(), Action::Terminate(prod_ref));
+        }
       }
     }
 
     for (prod_ref, lr_state_builder) in transitions.goto_map {
       let child_lr_state = Self::calculate_transitions(
         states,
+        grammar,
         first_table,
         &lr_state_builder,
         Some(lr_state.clone()),
@@ -911,6 +994,7 @@ impl LRTable {
 
     let initial_state = Self::calculate_transitions(
       &mut states,
+      grammar,
       &mut first_table,
       &initial_lr_state,
       None,

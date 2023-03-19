@@ -1,6 +1,7 @@
 use proc_macro::{Span, TokenStream, TokenTree};
 use proc_macro_error::abort;
 use quote::quote;
+use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -1210,6 +1211,10 @@ impl Grammar {
     ProductionRef::new(Rc::downgrade(
       self.productions.get(&self.start_rule).unwrap(),
     ))
+  }
+
+  pub fn is_starting_rule(&self, prod_ref: &ProductionRef) -> bool {
+    prod_ref.deref().name() == self.start_rule
   }
 
   pub fn from(token_stream: Vec<Symbol>) -> Self {

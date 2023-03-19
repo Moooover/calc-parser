@@ -489,7 +489,7 @@ fn main() {
   }
   */
 
-  // aug_bnf_impl::aug_bnf! {
+  // parser_generator_impl::grammar_def! {
   //   terminal: char;
 
   //   <S> => <A> $;
@@ -498,7 +498,7 @@ fn main() {
   //   <B> => 'a' 'c';
   // };
 
-  // aug_bnf_impl::aug_bnf! {
+  // parser_generator_impl::grammar_def! {
   //   terminal: char;
 
   //   <I> => <S>;
@@ -509,7 +509,7 @@ fn main() {
   //        | !;
   // }
 
-  // aug_bnf_impl::aug_bnf! {
+  // parser_generator_impl::grammar_def! {
   //   name: Test;
   //   terminal: char;
 
@@ -541,7 +541,7 @@ fn main() {
   //   None => println!("no match :("),
   // }
 
-  aug_bnf_impl::aug_bnf! {
+  parser_generator_impl::grammar_def! {
     name: Test;
     terminal: char;
 
@@ -567,7 +567,7 @@ fn main() {
   }
 
   /*
-  aug_bnf_impl::aug_bnf! {
+  parser_generator_impl::grammar_def! {
     terminal: CToken;
 
     <program> => <declList>;

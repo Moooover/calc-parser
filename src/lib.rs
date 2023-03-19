@@ -1,4 +1,4 @@
-pub use aug_bnf_impl::aug_bnf;
+pub use parser_generator_impl::grammar_def;
 
 // enum RequestType {
 //   GET,
@@ -20,7 +20,7 @@ pub use aug_bnf_impl::aug_bnf;
 // }
 
 pub fn test_fn() {
-  // let parser = aug_bnf!(
+  // let parser = grammar_def!(
   //   0
   //   // if no {} given, return entire consumed text.
   //   // a re before text means to treat the text as regex.
@@ -47,7 +47,7 @@ mod tests {
     };
   }
 
-  aug_bnf_impl::aug_bnf! {
+  parser_generator_impl::grammar_def! {
     name: TestSimple;
     terminal: char;
 
@@ -74,7 +74,7 @@ mod tests {
     assert!(TestSimple::parse(char_iter!("ab")).is_some());
   }
 
-  aug_bnf_impl::aug_bnf! {
+  parser_generator_impl::grammar_def! {
     name: AddMul;
     terminal: char;
 

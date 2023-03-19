@@ -1,5 +1,5 @@
 [package]
-name = "aug_bnf_impl"
+name = "parser_generator_impl"
 version = "0.1.0"
 edition = "2021"
 

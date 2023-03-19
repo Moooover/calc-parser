@@ -3,14 +3,14 @@
 version = 3
 
 [[package]]
-name = "aug_bnf"
+name = "parser_generator"
 version = "0.1.0"
 dependencies = [
- "aug_bnf_impl",
+ "parser_generator_impl",
 ]
 
 [[package]]
-name = "aug_bnf_impl"
+name = "parser_generator_impl"
 version = "0.1.0"
 dependencies = [
  "proc-macro-error",

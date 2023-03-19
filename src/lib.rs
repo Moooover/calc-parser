@@ -93,5 +93,7 @@ mod tests {
   }
 
   #[test]
-  fn add_mul_grammar() {}
+  fn add_mul_grammar() {
+    assert!(TestSimple::parse(char_iter!("ab")).is_some());
+  }
 }

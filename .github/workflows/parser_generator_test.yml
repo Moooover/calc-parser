@@ -17,6 +17,10 @@ jobs:
         with:
           path: parser_generator
           submodules: recursive
+      - name: Configure nightly compiler
+        working-directory: parser_generator
+        run: |
+          rustup override set nightly
       - name: Initialize and Build
         working-directory: parser_generator
         run: |

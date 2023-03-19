@@ -509,35 +509,56 @@ fn main() {
   //        | !;
   // }
 
+  // aug_bnf_impl::aug_bnf! {
+  //   name: Test;
+  //   terminal: char;
+
+  //   <I>: u32 => <S> {
+  //     #S + 3
+  //   };
+  //   <S>: u32 => 'x' <A> 'y' {
+  //     7
+  //   };
+  //   <S>: u32 => 'z' <A> 'w' {
+  //     if #A {
+  //       2 * 4
+  //     } else {
+  //       1 * 10
+  //     }
+  //   };
+  //   <A>: bool => 'a' {
+  //     true
+  //   } | 'b' {
+  //     false
+  //   };
+  // }
+
+  // let x = vec!['x', 'a', 'y'];
+  // let res = Test::parse(x.iter());
+
+  // match res {
+  //   Some(i) => println!("Result: {}", i),
+  //   None => println!("no match :("),
+  // }
+
   aug_bnf_impl::aug_bnf! {
     name: Test;
     terminal: char;
 
-    <I>: u32 => <S> {
-      #S + 3
-    };
-    <S>: u32 => 'x' <A> 'y' {
-      7
-    };
-    <S>: u32 => 'z' <A> 'w' {
-      if #A {
-        2 * 4
-      } else {
-        1 * 10
-      }
-    };
-    <A>: bool => 'a' {
-      true
-    } | 'b' {
-      false
-    };
-  }
+    <S> => <A>;
+    <A> => <A> '+' <P>;
+    <A> => <P>;
+    <P> => <P> '*' <V>;
+    <P> => <V>;
+    <V> => '1' | '2';
+    // <V>: u32 => '1' { 1 } | '2' { 2 };
+  };
 
-  let x = vec!['x', 'a', 'y'];
+  let x = vec!['2', '*', '2', '+', '1'];
   let res = Test::parse(x.iter());
 
   match res {
-    Some(i) => println!("Result: {}", i),
+    Some(i) => println!("Result!"),
     None => println!("no match :("),
   }
 

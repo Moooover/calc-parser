@@ -21,7 +21,7 @@ pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let grammar = Grammar::from(list);
   // let s = format!("{}", grammar);
   let lr_table = LRTable::from_grammar(&grammar).unwrap_or_else(|err| err.raise());
-  // let l = format!("{}", lr_table);
+  eprintln!("{}", lr_table);
   let syn_tree = code_gen::to_match_loop(&grammar, &lr_table).unwrap_or_else(|err| err.raise());
   return syn_tree.into();
 

@@ -252,7 +252,7 @@ impl<'a> CodeGen<'a> {
     let lr_state = lr_entry.lr_state();
     let enum_variant = self.to_enum_variant(lr_state);
 
-    eprintln!("state: {} ({})", lr_state, enum_variant);
+    eprintln!("{}: {lr_state} ({enum_variant})", enum_variant.to_string());
 
     lr_state.transitions.action_map.iter().try_fold(
       proc_macro2::TokenStream::new(),
@@ -315,7 +315,7 @@ impl<'a> CodeGen<'a> {
                     #variants
                     _ => unreachable!(),
                   };
-                  println!("Set {} to {}", #var_str, #var_name);
+                  println!("Set {} to {:?}", #var_str, #var_name);
                 }
               },
             );
@@ -386,8 +386,8 @@ impl<'a> CodeGen<'a> {
               .inst
               .rule_ref
               .rules();
-            let constructor = prod_rules.constructor.as_ref().unwrap();
-            let cons_tokens = cons_ctx.generate_constructor(constructor)?;
+            let constructor = prod_rules.constructor.clone().unwrap_or_default();
+            let cons_tokens = cons_ctx.generate_constructor(&constructor)?;
 
             eprintln!("{}", goto_or_return.to_string());
             eprintln!("cons: {}", constructor);
@@ -423,7 +423,6 @@ impl<'a> CodeGen<'a> {
         })
       },
     )?;
-    eprintln!("{}", state_transitions.to_string());
 
     ParseResult::Ok(quote! {
       let mut states = vec![#initial_state];

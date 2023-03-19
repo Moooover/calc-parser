@@ -510,6 +510,7 @@ impl Closure {
         .map(|state| state.into()),
     );
 
+    // TODO fix closure calc: missing lookaheads for recursive rules for some reason.
     while let Some(state) = queue.pop_front() {
       if let Some(mut prod_state) = expanded_rules.take(&state) {
         // If this rule has already been expanded, we just need to merge
@@ -925,8 +926,8 @@ impl LRTable {
 
 impl Display for LRTable {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    for (i, state) in self.states.iter().enumerate() {
-      write!(f, "state {}: {}\n", i, state)?;
+    for state in self.states.iter() {
+      write!(f, "state {}: {}\n", state.lr_state().uid, state)?;
     }
     Ok(())
   }

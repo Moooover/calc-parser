@@ -1,5 +1,6 @@
 use proc_macro::{Span, TokenStream, TokenTree};
 use proc_macro_error::abort;
+use quote::quote;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -830,6 +831,16 @@ impl Constructor {
 
   pub fn span(&self) -> Span {
     self.span
+  }
+}
+
+impl std::default::Default for Constructor {
+  /// The default constructor is one that simply returns the unit type ("()").
+  fn default() -> Self {
+    Self {
+      group: proc_macro::Group::new(proc_macro::Delimiter::Brace, quote! { () }.into()),
+      span: proc_macro::Span::call_site(),
+    }
   }
 }
 

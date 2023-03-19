@@ -48,7 +48,7 @@ mod tests {
       name: Test;
       terminal: char;
 
-      <S> => <A> $;
+      <S> => <A>;
       <A> => <A> '+' <P>;
       <A> => <P>;
       <P> => <P> '*' <V>;

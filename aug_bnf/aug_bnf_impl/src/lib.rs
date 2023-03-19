@@ -16,6 +16,7 @@ use symbol::Symbol;
 
 #[proc_macro_error]
 #[proc_macro]
+/// Constructs an AugBnf parser based on the definition provided.
 pub fn aug_bnf(tokens: TokenStream) -> TokenStream {
   let list = Symbol::from_stream(tokens);
   let grammar = Grammar::from(list);

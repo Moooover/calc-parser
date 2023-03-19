@@ -50,10 +50,6 @@ impl ConstructorContext {
         ProductionRule::Intermediate(prod_ref) => {
           let prod = prod_ref.deref();
 
-          // The type of values returned by constructors of this
-          // production.
-          let val_type = prod.name.type_spec_as_type();
-
           let var_ref = if let Some(alias) = &prod_ref.alias {
             alias.clone()
           } else {
@@ -341,11 +337,8 @@ impl<'a> CodeGen<'a> {
             // this is the initial state being completed.
             let goto_or_return = if let Action::Terminate(_) = action {
               // If this is a terminate action, then we can return the
-              // constructed value, if the input stream is empty.
+              // constructed value.
               quote! {
-                if input_stream.peek().is_some() {
-                  return None;
-                }
                 return Some(cons);
               }
             } else {
@@ -411,10 +404,7 @@ impl<'a> CodeGen<'a> {
               (#enum_variant, #term_pattern) => {
                 println!("Got to this guy!");
                 #var_builders
-
-                // TODO construct the variant
                 let cons = #cons_tokens;
-
                 #goto_or_return
               }
             })

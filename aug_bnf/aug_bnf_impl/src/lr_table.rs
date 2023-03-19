@@ -145,7 +145,7 @@ impl<'a> PartialProductionState {
   }
 
   /// Returns true if this state changed with this operation.
-  pub fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) -> bool {
+  fn merge_lookaheads<I: Iterator<Item = Terminal>>(&mut self, lookaheads: I) -> bool {
     let prev_n_possible_lookaheads = self.possible_lookaheads.len();
     self.possible_lookaheads.extend(lookaheads);
     prev_n_possible_lookaheads != self.possible_lookaheads.len()

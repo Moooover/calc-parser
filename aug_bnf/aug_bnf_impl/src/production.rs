@@ -313,12 +313,14 @@ impl Terminal {
     }
   }
 
-  /// Will expand to `Some(tokens)` if this is a `Terminal::Sym` or `None` if
-  /// this is a `Terminal::EndOfStream`. `Terminal::Epsilon` should never call
-  /// this.
+  /// Will expand to `Some(tokens)` if this is a `Terminal::Sym` or `_` if this
+  /// is a `Terminal::EndOfStream`. `Terminal::Epsilon` should never call this.
   pub fn as_peek_pattern(&self) -> proc_macro2::TokenStream {
     match self {
-      Terminal::EndOfStream(span) => quote::quote_spanned!(span.span().into()=> None),
+      // Match anything for end of stream, including the actual end of stream
+      // (None) or any token (Some(_)). This is to allow parsing of only part
+      // of the input stream.
+      Terminal::EndOfStream(span) => quote::quote_spanned!(span.span().into()=> _),
       Terminal::Epsilon(_) => unreachable!(),
       Terminal::Sym(sym) => {
         let tokens: proc_macro2::TokenStream = sym.tokens.clone().into();

@@ -1,4 +1,3 @@
-/// Constructs an AugBnf parser based on the definition provided.
 pub use aug_bnf_impl::aug_bnf;
 
 // enum RequestType {
@@ -40,21 +39,59 @@ pub fn test_fn() {
   // );
 }
 
+macro_rules! char_iter {
+  ($s:expr) => {
+    $s.chars().into_iter()
+  };
+}
+
 #[cfg(test)]
 mod tests {
-  #[test]
-  fn add_mul_grammar() {
-    aug_bnf_impl::aug_bnf! {
-      name: Test;
-      terminal: char;
+  aug_bnf_impl::aug_bnf! {
+    name: TestSimple;
+    terminal: char;
 
-      <S> => <A>;
-      <A> => <A> '+' <P>;
-      <A> => <P>;
-      <P> => <P> '*' <V>;
-      <P> => <V>;
-      <V> => 'a';
-      <V> => 'b';
-    };
+    <S> => 'a';
   }
+
+  #[test]
+  fn test_simple_parses() {
+    assert!(TestSimple::parse(char_iter!("a")).is_some());
+  }
+
+  #[test]
+  fn test_simple_empty_input() {
+    assert!(TestSimple::parse(char_iter!("")).is_none());
+  }
+
+  #[test]
+  fn test_simple_incorrect_input() {
+    assert!(TestSimple::parse(char_iter!("b")).is_none());
+  }
+
+  #[test]
+  fn test_simple_extra_input() {
+    assert!(TestSimple::parse(char_iter!("ab")).is_some());
+  }
+
+  aug_bnf_impl::aug_bnf! {
+    name: AddMul;
+    terminal: char;
+
+    <S>: u32 => <A> { #A };
+    <A>: u32 => <A> '+' <P> {
+      #A + #P
+    } | <P> {
+      #P
+    };
+    <P>: u32 => <P> '*' <V> {
+      #P * #V
+    } | <V> {
+      #V
+    };
+    <V>: u32 => '1' { 1 } | '2' { 2 };
+  }
+
+  #[test]
+  fn add_mul_grammar() {}
 }

@@ -39,14 +39,14 @@ pub fn test_fn() {
   // );
 }
 
-macro_rules! char_iter {
-  ($s:expr) => {
-    $s.chars().into_iter().peekable()
-  };
-}
-
 #[cfg(test)]
 mod tests {
+  macro_rules! char_iter {
+    ($s:expr) => {
+      $s.chars().into_iter().peekable()
+    };
+  }
+
   aug_bnf_impl::aug_bnf! {
     name: TestSimple;
     terminal: char;

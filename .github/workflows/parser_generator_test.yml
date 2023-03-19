@@ -12,21 +12,18 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
-      - name: Check out Cargo
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
       - name: Check out parser_generator
         uses: actions/checkout@v2
         with:
           path: parser_generator
           submodules: recursive
       - name: Initialize and Build
+        uses: actions-rs/cargo@v1
         working-directory: parser_generator
-        run: |
-          cargo build
+        with:
+          command: build
       - name: Run unit tests
+        uses: actions-rs/cargo@v1
         working-directory: parser_generator
-        run: |
-          cargo test
+        with:
+          command: test

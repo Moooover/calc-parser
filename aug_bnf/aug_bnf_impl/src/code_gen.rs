@@ -6,6 +6,15 @@ use crate::util::{ParseError, ParseResult};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+macro_rules! token_stream_with_span {
+  ($stream:expr, $span:expr) => {
+    proc_macro2::TokenStream::from_iter($stream.clone().into_iter().map(|mut token_tree| {
+      token_tree.set_span($span);
+      token_tree
+    }))
+  };
+}
+
 fn as_integer_literal(tokens: proc_macro2::TokenStream) -> Option<u32> {
   match syn::parse2::<syn::Lit>(tokens) {
     Ok(syn::Lit::Int(x)) => {
@@ -78,7 +87,7 @@ impl ConstructorContext {
         if p.as_char() == '#' && p.spacing() == proc_macro2::Spacing::Alone {
           if let Some(proc_macro2::TokenTree::Ident(sym)) = tokens_iter.peek() {
             if let Some(var_ref) = self.var_alias_map.get(&sym.to_string()) {
-              to_insert = var_ref.clone();
+              to_insert = token_stream_with_span!(var_ref, sym.span());
 
               // Consume the identifier.
               tokens_iter.next();
@@ -94,7 +103,7 @@ impl ConstructorContext {
               }
               // We already did the bounds check above!
               let var_ref = unsafe { self.var_idx_map.get_unchecked((rule_num - 1) as usize) };
-              to_insert = var_ref.clone();
+              to_insert = token_stream_with_span!(var_ref, literal.span());
 
               // Consume the literal.
               tokens_iter.next();
@@ -279,8 +288,6 @@ impl<'a> CodeGen<'a> {
               proc_macro2::TokenStream::new(),
               |tokens, (rule_idx, prod_rule)| {
                 let var_name = Self::unique_var(rule_idx);
-                let x = prod_rule.to_string();
-                let y = prod_rule_ref.rules().to_string();
                 let var_str = var_name.to_string();
 
                 // States can be reached via multiple paths through the dfa if
@@ -296,10 +303,7 @@ impl<'a> CodeGen<'a> {
 
                       quote! {
                         #tokens
-                        Some(#enum_inst(val)) => {
-                          println!("matched {}, {}", #x, #y);
-                          val
-                        }
+                        Some(#enum_inst(val)) => val,
                       }
                     });
 

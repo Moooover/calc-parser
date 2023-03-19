@@ -517,8 +517,7 @@ fn main() {
       #S + 3
     };
     <S>: u32 => 'x' <A> 'y' {
-      let x = 3 + 4;
-      x
+      7
     };
     <S>: u32 => 'z' <A> 'w' {
       if #A {
@@ -529,6 +528,8 @@ fn main() {
     };
     <A>: bool => 'a' {
       true
+    } | 'b' {
+      false
     };
   }
 

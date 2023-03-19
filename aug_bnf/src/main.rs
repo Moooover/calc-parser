@@ -559,10 +559,10 @@ fn main() {
     <V>: u32 => '1' { 1 } | '2' { 2 };
   };
 
-  let res = Test::parse("2*2+1".chars().into_iter());
+  let res = Test::parse("2*2+1".chars().into_iter().peekable());
 
   match res {
-    Some(i) => println!("Result: {}", i),
+    Some((i, _)) => println!("Result: {}", i),
     None => println!("no match :("),
   }
 

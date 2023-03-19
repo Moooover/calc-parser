@@ -339,7 +339,7 @@ impl<'a> CodeGen<'a> {
               // If this is a terminate action, then we can return the
               // constructed value.
               quote! {
-                return Some(cons);
+                return Some((cons, input_stream));
               }
             } else {
               let goto_transitions = parent_states.iter().fold(
@@ -479,15 +479,21 @@ impl<'a> CodeGen<'a> {
         /// Parses an input stream according to the grammar, returning the
         /// constructed object from a correctly formatted input, or None if the
         /// input was not a sentential form of the grammar.
-        pub fn parse_ref<'a, I: Iterator<Item = &'a #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
-          let mut input_stream = input_stream.peekable();
-
+        ///
+        /// This variant of parse uses an iterator over references to the
+        /// terminal type.
+        pub fn parse_ref<'a, I: Iterator<Item = &'a #terminal_type>>(
+          mut input_stream: std::iter::Peekable<I>,
+        ) -> Option<(#root_type, std::iter::Peekable<I>)> {
           #match_loop
         }
 
-        pub fn parse<I: Iterator<Item = #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
-          let mut input_stream = input_stream.peekable();
-
+        /// Parses an input stream according to the grammar, returning the
+        /// constructed object from a correctly formatted input, or None if the
+        /// input was not a sentential form of the grammar.
+        pub fn parse<I: Iterator<Item = #terminal_type>>(
+          mut input_stream: std::iter::Peekable<I>,
+        ) -> Option<(#root_type, std::iter::Peekable<I>)> {
           #match_loop
         }
       }

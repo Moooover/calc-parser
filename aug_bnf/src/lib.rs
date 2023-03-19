@@ -41,7 +41,7 @@ pub fn test_fn() {
 
 macro_rules! char_iter {
   ($s:expr) => {
-    $s.chars().into_iter()
+    $s.chars().into_iter().peekable()
   };
 }
 

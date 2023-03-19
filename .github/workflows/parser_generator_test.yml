@@ -10,8 +10,8 @@ jobs:
     steps:
       - name: Check out Rust toolchain
         uses: actions-rs/toolchain@v1
-          with:
-            toolchain: nightly
+        with:
+          toolchain: nightly
       - name: Check out Cargo
         uses: actions-rs/cargo@v1
         with:

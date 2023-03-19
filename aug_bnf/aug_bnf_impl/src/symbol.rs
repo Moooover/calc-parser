@@ -11,8 +11,8 @@ pub enum Operator {
   Colon,
   // ;
   Semicolon,
-  // $
-  DollarSign,
+  // #
+  NumberSign,
   // <
   BeginProd,
   // >
@@ -33,7 +33,7 @@ impl Operator {
       Operator::Arrow => "=>",
       Operator::Colon => ":",
       Operator::Semicolon => ";",
-      Operator::DollarSign => "$",
+      Operator::NumberSign => "#",
       Operator::BeginProd => "<",
       Operator::EndProd => ">",
       Operator::Pipe => "!",
@@ -50,7 +50,7 @@ impl Operator {
     match chars.next() {
       Some('=') => chars.next().is_some() || next_char != '>',
       Some(';') => true,
-      Some('$') => true,
+      Some('#') => true,
       Some('<') => true,
       Some('>') => true,
       Some('|') => true,
@@ -129,7 +129,7 @@ impl Symbol {
       "=>" => Symbol::new(SymbolT::Op(Operator::Arrow), span, tokens),
       ":" => Symbol::new(SymbolT::Op(Operator::Colon), span, tokens),
       ";" => Symbol::new(SymbolT::Op(Operator::Semicolon), span, tokens),
-      "$" => Symbol::new(SymbolT::Op(Operator::DollarSign), span, tokens),
+      "#" => Symbol::new(SymbolT::Op(Operator::NumberSign), span, tokens),
       "<" => Symbol::new(SymbolT::Op(Operator::BeginProd), span, tokens),
       ">" => Symbol::new(SymbolT::Op(Operator::EndProd), span, tokens),
       "|" => Symbol::new(SymbolT::Op(Operator::Pipe), span, tokens),

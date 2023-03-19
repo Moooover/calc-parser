@@ -1,8 +1,121 @@
-use quote::quote;
+use quote::{quote, ToTokens};
 
 use crate::lr_table::{Action, LRState, LRTable, LRTableEntry};
-use crate::production::{Grammar, ProductionRule};
+use crate::production::{Constructor, Grammar, ProductionRule, ProductionRules};
+use crate::util::{ParseError, ParseResult};
+use std::collections::HashMap;
 use std::rc::Rc;
+
+fn as_integer_literal(tokens: proc_macro2::TokenStream) -> Option<u32> {
+  match syn::parse2::<syn::Lit>(tokens) {
+    Ok(syn::Lit::Int(x)) => {
+      if let Result::Ok(x) = x.base10_parse::<u32>() {
+        Some(x)
+      } else {
+        None
+      }
+    }
+    _ => None,
+  }
+}
+
+struct ConstructorContext {
+  var_idx_map: Vec<proc_macro2::TokenStream>,
+  var_alias_map: HashMap<String, proc_macro2::TokenStream>,
+}
+
+impl ConstructorContext {
+  fn from_rules<F: Fn(usize) -> proc_macro2::TokenStream>(
+    prod_rules: &ProductionRules,
+    var_generator: F,
+  ) -> Self {
+    let mut var_idx_map = Vec::new();
+    let mut var_alias_map = HashMap::new();
+
+    for (rule_idx, prod_rule) in prod_rules.rules.iter().enumerate() {
+      let var_name = var_generator(rule_idx);
+
+      // All rules may be captured via indexes.
+      var_idx_map.push(var_name.clone());
+      match prod_rule {
+        ProductionRule::Intermediate(prod_ref) => {
+          let prod = prod_ref.deref();
+
+          // The type of values returned by constructors of this
+          // production.
+          let val_type = prod.name.type_spec_as_type();
+
+          let var_ref = if let Some(alias) = &prod_ref.alias {
+            alias.clone()
+          } else {
+            prod.name().to_string()
+          };
+          var_alias_map.insert(var_ref, var_name.clone());
+        }
+        ProductionRule::Terminal(term) => {
+          // TODO also capture terminals with aliases, not just indexes.
+        }
+      }
+    }
+
+    Self {
+      var_idx_map,
+      var_alias_map,
+    }
+  }
+
+  fn generate_constructor(
+    &self,
+    constructor: &Constructor,
+  ) -> ParseResult<proc_macro2::TokenStream> {
+    let input_tokens: proc_macro2::TokenStream = constructor.group.stream().into();
+    let mut tokens_iter = input_tokens.into_iter().peekable();
+    let mut cons_tokens = proc_macro2::TokenStream::new();
+    while let Some(tt) = tokens_iter.next() {
+      let mut to_insert = tt.to_token_stream();
+
+      if let proc_macro2::TokenTree::Punct(p) = &tt {
+        if p.as_char() == '#' && p.spacing() == proc_macro2::Spacing::Alone {
+          if let Some(proc_macro2::TokenTree::Ident(sym)) = tokens_iter.peek() {
+            if let Some(var_ref) = self.var_alias_map.get(&sym.to_string()) {
+              to_insert = var_ref.clone();
+
+              // Consume the identifier.
+              tokens_iter.next();
+            }
+          } else if let Some(proc_macro2::TokenTree::Literal(literal)) = tokens_iter.peek() {
+            if let Some(rule_num) = as_integer_literal(literal.to_token_stream()) {
+              if rule_num < 1 || (rule_num as usize) > self.var_idx_map.len() {
+                return ParseError::new(
+                  &format!("Invalid rule number \"{}\"", rule_num),
+                  tt.span().unwrap(),
+                )
+                .into();
+              }
+              // We already did the bounds check above!
+              let var_ref = unsafe { self.var_idx_map.get_unchecked((rule_num - 1) as usize) };
+              to_insert = var_ref.clone();
+
+              // Consume the literal.
+              tokens_iter.next();
+            }
+          }
+        }
+      }
+
+      cons_tokens = quote! {
+        #cons_tokens
+        #to_insert
+      }
+    }
+
+    return ParseResult::Ok(quote! {
+      {
+        #cons_tokens
+      }
+    });
+  }
+}
 
 struct CodeGen<'a> {
   grammar: &'a Grammar,
@@ -123,13 +236,16 @@ impl<'a> CodeGen<'a> {
       })
   }
 
-  fn generate_dfa_transitions(&self, lr_entry: &Rc<LRTableEntry>) -> proc_macro2::TokenStream {
+  fn generate_dfa_transitions(
+    &self,
+    lr_entry: &Rc<LRTableEntry>,
+  ) -> ParseResult<proc_macro2::TokenStream> {
     let lr_state = lr_entry.lr_state();
     let enum_variant = self.to_enum_variant(lr_state);
 
     eprintln!("state: {} ({})", lr_state, enum_variant);
 
-    lr_state.transitions.action_map.iter().fold(
+    lr_state.transitions.action_map.iter().try_fold(
       proc_macro2::TokenStream::new(),
       |tokens, (term, action)| {
         let term_pattern = term.as_peek_pattern();
@@ -140,7 +256,7 @@ impl<'a> CodeGen<'a> {
             let next_state = self.to_enum_inst(next_lr_state);
             let sym_tokens = term.as_sym_tokens();
 
-            quote! {
+            ParseResult::Ok(quote! {
               #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Consuming {}", #sym_tokens);
@@ -148,11 +264,13 @@ impl<'a> CodeGen<'a> {
                 input_stream.next();
                 states.push(#next_state(#sym_tokens));
               }
-            }
+            })
           }
           Action::Reduce(prod_rule_ref) => {
             let rules = &prod_rule_ref.rules().rules;
             let mut parent_states = LRTableEntry::as_parent_set(lr_entry);
+
+            let cons_ctx = ConstructorContext::from_rules(prod_rule_ref.rules(), Self::unique_var);
 
             // For each of the states consumed by this rule, place them in a
             // unique variable indexed by the rule index corresponding to the
@@ -184,19 +302,6 @@ impl<'a> CodeGen<'a> {
                       }
                     });
 
-                // match prod_rule {
-                //   ProductionRule::Intermediate(prod_ref) => {
-                //     let prod = prod_ref.deref();
-
-                //     // The type of values returned by constructors of this
-                //     // production.
-                //     let val_type = prod.name.type_spec_as_type();
-                //   }
-                //   ProductionRule::Terminal(term) => {
-                //     // TODO capture terminals too, either with $<index> or aliases
-                //   }
-                // }
-
                 parent_states = LRState::parents_of(&parent_states);
 
                 quote! {
@@ -208,9 +313,6 @@ impl<'a> CodeGen<'a> {
                 }
               },
             );
-
-            // TODO: get from prod_rule_ref to prod_ref, push the goto state
-            // let goto_state = lr_state.transitions.goto_map.get();
 
             // Construct either the goto switch, or the return statement if
             // this is the initial state being completed.
@@ -267,43 +369,55 @@ impl<'a> CodeGen<'a> {
               }
             };
 
-            eprintln!("{}", goto_or_return.to_string());
+            let prod_rules = lr_state
+              .states
+              .states
+              .iter()
+              .nth(0)
+              .unwrap()
+              .inst
+              .rule_ref
+              .rules();
+            let constructor = prod_rules.constructor.as_ref().unwrap();
+            let cons_tokens = cons_ctx.generate_constructor(constructor)?;
 
-            quote! {
+            eprintln!("{}", goto_or_return.to_string());
+            eprintln!("cons: {}", constructor);
+
+            ParseResult::Ok(quote! {
               #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Got to this guy!");
                 #var_builders
 
                 // TODO construct the variant
-                let cons = 0;
+                let cons = #cons_tokens;
 
                 #goto_or_return
               }
-            }
+            })
           }
         }
+        .into()
       },
     )
   }
 
-  fn generate_match_loop(&self) -> proc_macro2::TokenStream {
+  fn generate_match_loop(&self) -> ParseResult<proc_macro2::TokenStream> {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
-    let state_transitions =
-      self
-        .lr_table
-        .states
-        .iter()
-        .fold(proc_macro2::TokenStream::new(), |tokens, lr_entry| {
-          let dfa_state = self.generate_dfa_transitions(lr_entry);
-          quote! {
-            #dfa_state,
-            #tokens
-          }
-        });
+    let state_transitions = self.lr_table.states.iter().try_fold(
+      proc_macro2::TokenStream::new(),
+      |tokens, lr_entry| {
+        let dfa_state = self.generate_dfa_transitions(lr_entry)?;
+        ParseResult::Ok(quote! {
+          #dfa_state,
+          #tokens
+        })
+      },
+    )?;
     eprintln!("{}", state_transitions.to_string());
 
-    quote! {
+    ParseResult::Ok(quote! {
       let mut states = vec![#initial_state];
       loop {
         let state = states.last().unwrap();
@@ -324,19 +438,19 @@ impl<'a> CodeGen<'a> {
           }
         }
       }
-    }
+    })
   }
 
-  fn generate(&self) -> proc_macro2::TokenStream {
+  fn generate(&self) -> ParseResult<proc_macro2::TokenStream> {
     let parser_name = &self.parser_name;
     let dfa_name = &self.dfa_name;
     let terminal_type = &self.terminal_type;
     let root_type = &self.root_type;
 
     let states = self.generate_dfa_states();
-    let match_loop = self.generate_match_loop();
+    let match_loop = self.generate_match_loop()?;
 
-    quote! {
+    ParseResult::Ok(quote! {
       enum #dfa_name {
         #states
       }
@@ -353,10 +467,13 @@ impl<'a> CodeGen<'a> {
           #match_loop
         }
       }
-    }
+    })
   }
 }
 
-pub fn to_match_loop(grammar: &Grammar, lr_table: &LRTable) -> proc_macro2::TokenStream {
+pub fn to_match_loop(
+  grammar: &Grammar,
+  lr_table: &LRTable,
+) -> ParseResult<proc_macro2::TokenStream> {
   CodeGen::new(grammar, lr_table).generate()
 }

@@ -514,7 +514,7 @@ fn main() {
     terminal: char;
 
     <I>: u32 => <S> {
-      $S + 3
+      #S + 3
     };
     <S>: u32 => 'x' <A> 'y' {
       let x = 3 + 4;

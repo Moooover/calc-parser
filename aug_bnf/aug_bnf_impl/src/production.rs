@@ -379,7 +379,7 @@ impl Terminal {
           // Consume the symbol.
           iter.next();
         }
-        SymbolT::Op(Operator::DollarSign) => {
+        SymbolT::Op(Operator::NumberSign) => {
           // If we've already consumed some tokens, don't include this '$' in
           // the terminal.
           if tokens.is_empty() {

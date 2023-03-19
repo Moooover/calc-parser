@@ -545,20 +545,25 @@ fn main() {
     name: Test;
     terminal: char;
 
-    <S> => <A>;
-    <A> => <A> '+' <P>;
-    <A> => <P>;
-    <P> => <P> '*' <V>;
-    <P> => <V>;
-    <V> => '1' | '2';
-    // <V>: u32 => '1' { 1 } | '2' { 2 };
+    <S>: u32 => <A> { #A };
+    <A>: u32 => <A> '+' <P> {
+      #A + #P
+    } | <P> {
+      #P
+    };
+    <P>: u32 => <P> '*' <V> {
+      #P * #V
+    } | <V> {
+      #V
+    };
+    <V>: u32 => '1' { 1 } | '2' { 2 };
   };
 
   let x = vec!['2', '*', '2', '+', '1'];
   let res = Test::parse(x.iter());
 
   match res {
-    Some(i) => println!("Result!"),
+    Some(i) => println!("Result: {}", i),
     None => println!("no match :("),
   }
 

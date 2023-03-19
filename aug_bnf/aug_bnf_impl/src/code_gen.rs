@@ -489,7 +489,13 @@ impl<'a> CodeGen<'a> {
         /// Parses an input stream according to the grammar, returning the
         /// constructed object from a correctly formatted input, or None if the
         /// input was not a sentential form of the grammar.
-        pub fn parse<'a, I: Iterator<Item = &'a #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
+        pub fn parse_ref<'a, I: Iterator<Item = &'a #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
+          let mut input_stream = input_stream.peekable();
+
+          #match_loop
+        }
+
+        pub fn parse<I: Iterator<Item = #terminal_type>>(mut input_stream: I) -> Option<#root_type> {
           let mut input_stream = input_stream.peekable();
 
           #match_loop

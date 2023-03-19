@@ -559,8 +559,7 @@ fn main() {
     <V>: u32 => '1' { 1 } | '2' { 2 };
   };
 
-  let x = vec!['2', '*', '2', '+', '1'];
-  let res = Test::parse(x.iter());
+  let res = Test::parse("2*2+1".chars().into_iter());
 
   match res {
     Some(i) => println!("Result: {}", i),

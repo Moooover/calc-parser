@@ -281,6 +281,7 @@ impl<'a> CodeGen<'a> {
                 let var_name = Self::unique_var(rule_idx);
                 let x = prod_rule.to_string();
                 let y = prod_rule_ref.rules().to_string();
+                let var_str = var_name.to_string();
 
                 // States can be reached via multiple paths through the dfa if
                 // they or their ancestors were merged, so we need to match
@@ -296,7 +297,7 @@ impl<'a> CodeGen<'a> {
                       quote! {
                         #tokens
                         Some(#enum_inst(val)) => {
-                          println!("{}, {}", #x, #y);
+                          println!("matched {}, {}", #x, #y);
                           val
                         }
                       }
@@ -310,6 +311,7 @@ impl<'a> CodeGen<'a> {
                     #variants
                     _ => unreachable!(),
                   };
+                  println!("Set {} to {}", #var_str, #var_name);
                 }
               },
             );
@@ -351,10 +353,12 @@ impl<'a> CodeGen<'a> {
                   }
                   let next_lr_state = next_lr_entry_ptr.unwrap().lr_state();
                   let next_enum_variant = self.to_enum_inst(next_lr_state);
+                  let evstr = next_enum_variant.to_string();
 
                   quote! {
                     #tokens
                     Some(#parent_enum_variant) => {
+                      println!("Going to {}", #evstr);
                       states.push(#next_enum_variant(cons));
                     }
                   }
@@ -362,7 +366,7 @@ impl<'a> CodeGen<'a> {
               );
 
               quote! {
-                match states.pop() {
+                match states.last() {
                   #goto_transitions
                   _ => unreachable!(),
                 }
@@ -423,6 +427,11 @@ impl<'a> CodeGen<'a> {
         let state = states.last().unwrap();
         let next_token = input_stream.peek();
 
+        for s in states.iter() {
+          print!("{:?} ", s);
+        }
+        println!("");
+
         match (state, next_token) {
           #state_transitions
           _ => {
@@ -451,6 +460,7 @@ impl<'a> CodeGen<'a> {
     let match_loop = self.generate_match_loop()?;
 
     ParseResult::Ok(quote! {
+      #[derive(Debug)]
       enum #dfa_name {
         #states
       }

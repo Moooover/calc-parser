@@ -1,7 +1,6 @@
 use proc_macro::{Span, TokenStream, TokenTree};
 use proc_macro_error::abort;
 use quote::quote;
-use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -328,6 +327,13 @@ impl Terminal {
           Some(#tokens)
         }
       }
+    }
+  }
+
+  pub fn is_end_of_stream(&self) -> bool {
+    match self {
+      Terminal::EndOfStream(_) => true,
+      _ => false,
     }
   }
 

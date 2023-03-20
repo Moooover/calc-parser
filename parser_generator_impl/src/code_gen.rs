@@ -272,14 +272,13 @@ impl<'a> CodeGen<'a> {
       |tokens, (term, action)| {
         let term_pattern = term.as_peek_pattern();
 
-        match action {
+        let match_tokens = match action {
           Action::Shift(lr_table_entry) => {
             let next_lr_state = lr_table_entry.lr_state();
             let next_state = self.to_enum_inst(next_lr_state);
             let sym_tokens = term.as_sym_tokens();
 
             ParseResult::Ok(quote! {
-              #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Consuming {}", #sym_tokens);
                 // Consume the token.
@@ -400,7 +399,6 @@ impl<'a> CodeGen<'a> {
             eprintln!("cons: {}", constructor);
 
             ParseResult::Ok(quote! {
-              #tokens
               (#enum_variant, #term_pattern) => {
                 println!("Got to this guy!");
                 #var_builders
@@ -409,8 +407,21 @@ impl<'a> CodeGen<'a> {
               }
             })
           }
-        }
-        .into()
+        }?;
+
+        // End of stream must be placed at the end of the match, since `_` is a
+        // catch-all, and match branches match based on declaration order.
+        ParseResult::Ok(if term.is_end_of_stream() {
+          quote! {
+            #tokens
+            #match_tokens
+          }
+        } else {
+          quote! {
+            #match_tokens
+            #tokens
+          }
+        })
       },
     )
   }

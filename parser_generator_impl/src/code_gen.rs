@@ -287,6 +287,8 @@ impl<'a> CodeGen<'a> {
 
     // TODO combine transitions with the same action into branches (p1 | p2 | ...)
     // do the same with gotos
+    // later TODO: combine states who have the same constructor (this will be
+    // more difficult, maybe can do with just default/auto gen constructors).
     lr_state.transitions.action_map.iter().try_fold(
       proc_macro2::TokenStream::new(),
       |tokens, (term, action)| {

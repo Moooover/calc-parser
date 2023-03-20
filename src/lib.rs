@@ -1,24 +1,5 @@
 pub use parser_generator_impl::grammar_def;
 
-// enum RequestType {
-//   GET,
-//   HEAD,
-// }
-
-// struct Req {
-//   req_type: RequestType,
-//   uri: String,
-// }
-
-// impl Req {
-//   pub fn new(req_type: RequestType, uri: &str) -> Self {
-//     Self {
-//       req_type,
-//       uri: uri.to_string()
-//     }
-//   }
-// }
-
 pub fn test_fn() {
   // let parser = grammar_def!(
   //   0
@@ -106,12 +87,85 @@ mod tests {
   }
 
   #[test]
-  fn test_mul_add() {
+  fn test_add_mul_single_digit() {
+    assert_full_evaluates!(AddMul::parse(char_iter!("2")), 2);
+  }
+
+  #[test]
+  fn test_add_mul_add() {
+    assert_full_evaluates!(AddMul::parse(char_iter!("2+3")), 5);
+  }
+
+  #[test]
+  fn test_add_mul_mul() {
+    assert_full_evaluates!(AddMul::parse(char_iter!("2*3")), 6);
+  }
+
+  #[test]
+  fn test_add_mul_mul_add() {
     assert_full_evaluates!(AddMul::parse(char_iter!("2*2+3")), 7);
   }
 
   #[test]
-  fn test_add_mul() {
+  fn test_add_mul_add_mul() {
     assert_full_evaluates!(AddMul::parse(char_iter!("2+2*3")), 8);
+  }
+
+  #[derive(Debug, PartialEq, Eq)]
+  enum RequestType {
+    GET,
+    HEAD,
+  }
+
+  #[derive(Debug, PartialEq, Eq)]
+  struct Req {
+    req_type: RequestType,
+    uri: String,
+  }
+
+  impl Req {
+    pub fn new(req_type: RequestType, uri: String) -> Self {
+      Self { req_type, uri }
+    }
+  }
+
+  parser_generator_impl::grammar_def! {
+    name: GetReq;
+    terminal: char;
+
+    // if no {} given, return entire consumed text.
+    // a re before text means to treat the text as regex.
+    <absoluteURI>: String => ':' <alphas> {
+      #1.to_string() + &#alphas
+    };
+    <req>: RequestType => 'G' 'E' 'T' { RequestType::GET }
+          | 'H' 'E' 'A' 'D' { RequestType::HEAD };
+    <uri>: String => <absoluteURI> {
+      #1
+    };
+    <header>: Req => <req> ' ' <uri> {
+      Req::new(#req, #uri)
+    };
+
+    <alphas>: String => <alphas> <alpha> {
+      #alphas + &#alpha.to_string()
+    } | <alpha> {
+      #alpha.to_string()
+    };
+    <alpha>: char => 'a' { 'a' } | 'b' { 'b' };
+    // <alpha>: char => 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
+    //          | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+    //          | 'u' | 'v' | 'w' | 'x' | 'y' | 'z'
+    //          | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'
+    //          | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T'
+    //          | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+  }
+
+  #[test]
+  fn test_parse_uri() {
+    assert_full_evaluates!(
+      GetReq::parse(char_iter!("GET :abba")),
+      Req::new(RequestType::GET, ":abba".to_string())
+    );
   }
 }

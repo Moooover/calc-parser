@@ -69,50 +69,68 @@ impl ConstructorContext {
     }
   }
 
+  fn generate_tokens<I: Iterator<Item = proc_macro2::TokenTree>>(
+    &self,
+    tokens_iter: &mut std::iter::Peekable<I>,
+  ) -> ParseResult<proc_macro2::TokenStream> {
+    let mut tokens = proc_macro2::TokenStream::new();
+
+    while let Some(tt) = tokens_iter.next() {
+      let mut to_insert = tt.to_token_stream();
+
+      match &tt {
+        proc_macro2::TokenTree::Punct(p) => {
+          if p.as_char() == '#' && p.spacing() == proc_macro2::Spacing::Alone {
+            if let Some(proc_macro2::TokenTree::Ident(sym)) = tokens_iter.peek() {
+              if let Some(var_ref) = self.var_alias_map.get(&sym.to_string()) {
+                to_insert = token_stream_with_span!(var_ref, sym.span());
+
+                // Consume the identifier.
+                tokens_iter.next();
+              }
+            } else if let Some(proc_macro2::TokenTree::Literal(literal)) = tokens_iter.peek() {
+              if let Some(rule_num) = as_integer_literal(literal.to_token_stream()) {
+                if rule_num < 1 || (rule_num as usize) > self.var_idx_map.len() {
+                  return ParseError::new(
+                    &format!("Invalid rule number \"{}\"", rule_num),
+                    tt.span().unwrap(),
+                  )
+                  .into();
+                }
+                // We already did the bounds check above!
+                let var_ref = unsafe { self.var_idx_map.get_unchecked((rule_num - 1) as usize) };
+                to_insert = token_stream_with_span!(var_ref, literal.span());
+
+                // Consume the literal.
+                tokens_iter.next();
+              }
+            }
+          }
+        }
+        proc_macro2::TokenTree::Group(group) => {
+          let mut stream_iter = group.stream().clone().into_iter().peekable();
+          let internal_stream = self.generate_tokens(&mut stream_iter)?;
+          to_insert = proc_macro2::Group::new(group.delimiter(), internal_stream).to_token_stream();
+        }
+        _ => {}
+      }
+
+      tokens = quote! {
+        #tokens
+        #to_insert
+      }
+    }
+
+    return Ok(tokens);
+  }
+
   fn generate_constructor(
     &self,
     constructor: &Constructor,
   ) -> ParseResult<proc_macro2::TokenStream> {
     let input_tokens: proc_macro2::TokenStream = constructor.group.stream().into();
     let mut tokens_iter = input_tokens.into_iter().peekable();
-    let mut cons_tokens = proc_macro2::TokenStream::new();
-    while let Some(tt) = tokens_iter.next() {
-      let mut to_insert = tt.to_token_stream();
-
-      if let proc_macro2::TokenTree::Punct(p) = &tt {
-        if p.as_char() == '#' && p.spacing() == proc_macro2::Spacing::Alone {
-          if let Some(proc_macro2::TokenTree::Ident(sym)) = tokens_iter.peek() {
-            if let Some(var_ref) = self.var_alias_map.get(&sym.to_string()) {
-              to_insert = token_stream_with_span!(var_ref, sym.span());
-
-              // Consume the identifier.
-              tokens_iter.next();
-            }
-          } else if let Some(proc_macro2::TokenTree::Literal(literal)) = tokens_iter.peek() {
-            if let Some(rule_num) = as_integer_literal(literal.to_token_stream()) {
-              if rule_num < 1 || (rule_num as usize) > self.var_idx_map.len() {
-                return ParseError::new(
-                  &format!("Invalid rule number \"{}\"", rule_num),
-                  tt.span().unwrap(),
-                )
-                .into();
-              }
-              // We already did the bounds check above!
-              let var_ref = unsafe { self.var_idx_map.get_unchecked((rule_num - 1) as usize) };
-              to_insert = token_stream_with_span!(var_ref, literal.span());
-
-              // Consume the literal.
-              tokens_iter.next();
-            }
-          }
-        }
-      }
-
-      cons_tokens = quote! {
-        #cons_tokens
-        #to_insert
-      }
-    }
+    let cons_tokens = self.generate_tokens(&mut tokens_iter)?;
 
     return ParseResult::Ok(quote! {
       {
@@ -392,6 +410,8 @@ impl<'a> CodeGen<'a> {
               .inst
               .rule_ref
               .rules();
+            // TODO auto-generate constructor if production generates something
+            // and a rule is just a single element (terminal or other production).
             let constructor = prod_rules.constructor.clone().unwrap_or_default();
             let cons_tokens = cons_ctx.generate_constructor(&constructor)?;
 

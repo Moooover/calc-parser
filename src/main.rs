@@ -541,29 +541,71 @@ fn main() {
   //   None => println!("no match :("),
   // }
 
+  // parser_generator_impl::grammar_def! {
+  //   name: Test;
+  //   terminal: char;
+
+  //   <S>: u32 => <A> { #A };
+  //   <A>: u32 => <A> '+' <P> {
+  //     #A + #P
+  //   } | <P> {
+  //     #P
+  //   };
+  //   <P>: u32 => <P> '*' <V> {
+  //     #P * #V
+  //   } | <V> {
+  //     #V
+  //   };
+  //   <V>: u32 => '1' { 1 } | '2' { 2 };
+  // };
+
+  // let res = Test::parse("2*2+1".chars().into_iter().peekable());
+
+  // match res {
+  //   Some((i, _)) => println!("Result: {}", i),
+  //   None => println!("no match :("),
+  // }
+
+  #[derive(Debug, PartialEq, Eq)]
+  enum RequestType {
+    GET,
+    HEAD,
+  }
+
+  #[derive(Debug, PartialEq, Eq)]
+  struct Req {
+    req_type: RequestType,
+    uri: String,
+  }
+
+  impl Req {
+    pub fn new(req_type: RequestType, uri: String) -> Self {
+      Self { req_type, uri }
+    }
+  }
+
   parser_generator_impl::grammar_def! {
-    name: Test;
+    name: GetReq;
     terminal: char;
 
-    <S>: u32 => <A> { #A };
-    <A>: u32 => <A> '+' <P> {
-      #A + #P
-    } | <P> {
-      #P
+    // if no {} given, return entire consumed text.
+    // a re before text means to treat the text as regex.
+    <absoluteURI>: String => ':' <alphas> {
+      #1.to_string() + &#alphas
     };
-    <P>: u32 => <P> '*' <V> {
-      #P * #V
-    } | <V> {
-      #V
+    <req>: RequestType => 'G' 'E' 'T' { RequestType::GET }
+          | 'H' 'E' 'A' 'D' { RequestType::HEAD };
+    <uri>: String => <absoluteURI>;
+    <header>: Req => <req> ' ' <uri> {
+      Req::new(#req, #uri)
     };
-    <V>: u32 => '1' { 1 } | '2' { 2 };
-  };
 
-  let res = Test::parse("2*2+1".chars().into_iter().peekable());
-
-  match res {
-    Some((i, _)) => println!("Result: {}", i),
-    None => println!("no match :("),
+    <alphas>: String => <alphas> <alpha> {
+      #alphas + &#alpha.to_string()
+    } | <alpha> {
+      #alpha.to_string()
+    };
+    <alpha>: char => 'a' | 'b' | 'c';
   }
 
   /*
@@ -654,7 +696,7 @@ fn main() {
 // Regexes:
 // ::std::io::_(e?)print\([\s\r]*format_args!\([\s\r]*(.+)[\s\r]*\)[\s\r]*\);
 // $1print!($2);
-// ::core::panicking::panic\("internal error: entered unreachable code"\)
+// ::core::panicking::panic\([\s\r]*"internal error: entered unreachable code",?[\s\r]*\)
 // unreachable!()
 // <\[_\]>::into_vec\([\s\r]*#\[rustc_box\][\s\r]*::alloc::boxed::Box::new\((\[[^\]]+\])\),[\s\r]*\)
 // vec!$1

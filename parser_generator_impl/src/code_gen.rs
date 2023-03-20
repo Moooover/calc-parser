@@ -283,8 +283,10 @@ impl<'a> CodeGen<'a> {
     let lr_state = lr_entry.lr_state();
     let enum_variant = self.to_enum_variant(lr_state);
 
-    eprintln!("{}: {lr_state} ({enum_variant})", enum_variant.to_string());
+    // eprintln!("{}: {lr_state} ({enum_variant})", enum_variant.to_string());
 
+    // TODO combine transitions with the same action into branches (p1 | p2 | ...)
+    // do the same with gotos
     lr_state.transitions.action_map.iter().try_fold(
       proc_macro2::TokenStream::new(),
       |tokens, (term, action)| {
@@ -370,11 +372,8 @@ impl<'a> CodeGen<'a> {
                     .goto_map
                     .get(prod_rule_ref.prod_ref());
                   if next_lr_entry_ptr.is_none() {
-                    // The only way there can exist no parent states is if this
-                    // is the initial production rule, meaning we only have to
-                    // check that the input stream is empty.
                     eprintln!(
-                      "Ruh roh! {} => {} ({})",
+                      "This should never happen! {} => {} ({})",
                       lr_entry_ptr, lr_entry, prod_rule_ref
                     );
                     unreachable!();
@@ -401,22 +400,29 @@ impl<'a> CodeGen<'a> {
               }
             };
 
-            let prod_rules = lr_state
-              .states
-              .states
-              .iter()
-              .nth(0)
-              .unwrap()
-              .inst
-              .rule_ref
-              .rules();
-            // TODO auto-generate constructor if production generates something
-            // and a rule is just a single element (terminal or other production).
-            let constructor = prod_rules.constructor.clone().unwrap_or_default();
+            let prod_rule_ref = &lr_state.states.states.iter().nth(0).unwrap().inst.rule_ref;
+            let prod_ptr = prod_rule_ref.prod_ref().deref();
+            let prod_rules = prod_rule_ref.rules();
+            // Auto-generate constructor if production generates something and
+            // a rule is just a single element (terminal or other production).
+            let constructor = if prod_ptr.name.has_type_spec()
+              && prod_rules.len() == 1
+              && prod_rules.constructor.is_none()
+            {
+              // If no constructor is given, just return the value from the
+              // only pattern in this rule.
+              let var_name = Self::unique_var(0);
+              Constructor::new(
+                proc_macro::Group::new(proc_macro::Delimiter::Brace, quote! { #var_name }.into()),
+                proc_macro::Span::call_site(),
+              )
+            } else {
+              prod_rules.constructor.clone().unwrap_or_default()
+            };
             let cons_tokens = cons_ctx.generate_constructor(&constructor)?;
 
-            eprintln!("{}", goto_or_return.to_string());
-            eprintln!("cons: {}", constructor);
+            // eprintln!("{}", goto_or_return.to_string());
+            // eprintln!("cons: {}", constructor);
 
             ParseResult::Ok(quote! {
               (#enum_variant, #term_pattern) => {

@@ -617,12 +617,6 @@ impl Closure {
       if state.is_complete() {
         // Completed states can be reduced.
         for term in &state.possible_lookaheads {
-          eprintln!(
-            "namez: {} vs {} ({})",
-            grammar.starting_rule().name(),
-            state.inst.rule_ref.prod_ref().name(),
-            grammar.is_starting_rule(state.inst.rule_ref.prod_ref())
-          );
           if grammar.is_starting_rule(state.inst.rule_ref.prod_ref()) {
             transitions.insert_terminate(term.clone(), state.inst.rule_ref.clone())?;
           } else {

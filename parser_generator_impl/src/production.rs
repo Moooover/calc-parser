@@ -474,6 +474,10 @@ impl ProductionName {
     self.span
   }
 
+  pub fn has_type_spec(&self) -> bool {
+    self.type_spec.is_some()
+  }
+
   pub fn type_spec_as_type(&self) -> syn::Type {
     self.type_spec.clone().unwrap_or(Type::unit()).as_type()
   }
@@ -834,7 +838,7 @@ pub struct Constructor {
 }
 
 impl Constructor {
-  fn new(group: proc_macro::Group, span: Span) -> Self {
+  pub fn new(group: proc_macro::Group, span: Span) -> Self {
     Self { group, span }
   }
 

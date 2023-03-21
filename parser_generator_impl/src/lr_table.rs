@@ -719,7 +719,7 @@ impl Display for LRTableEntry {
   }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq)]
 pub enum Action {
   Shift(Rc<LRTableEntry>),
   Reduce(ProductionRuleRef),
@@ -752,7 +752,7 @@ impl Display for Action {
 }
 
 pub struct TransitionSet {
-  pub action_map: HashMap<Terminal, Action>,
+  pub action_map: HashMap<Action, Vec<Terminal>>,
   pub goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
 }
 
@@ -763,17 +763,34 @@ impl TransitionSet {
       goto_map: HashMap::new(),
     }
   }
+
+  fn insert_action(&mut self, term: Terminal, action: Action) {
+    if let Some(terminals) = self.action_map.get_mut(&action) {
+      terminals.push(term);
+    } else {
+      self.action_map.insert(action, vec![term]);
+    }
+  }
 }
 
 impl Display for TransitionSet {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     let mut first = true;
-    for (term, action) in &self.action_map {
+    for (action, terms) in &self.action_map {
       if !first {
         write!(f, "\n")?;
       }
       first = false;
-      write!(f, "{} -> {}", term, action)?;
+      write!(
+        f,
+        "({}) -> {}",
+        terms
+          .iter()
+          .map(|term| format!("{}", term))
+          .collect::<Vec<_>>()
+          .join(", "),
+        action
+      )?;
     }
     for (prod_ref, lr_table_entry) in &self.goto_map {
       if !first {
@@ -920,19 +937,13 @@ impl LRTable {
             Some(lr_state.clone()),
             next_uid,
           )?;
-          transition_set
-            .action_map
-            .insert(term.clone(), Action::Shift(child_lr_state));
+          transition_set.insert_action(term.clone(), Action::Shift(child_lr_state));
         }
         ActionBuilder::Reduce(prod_ref) => {
-          transition_set
-            .action_map
-            .insert(term.clone(), Action::Reduce(prod_ref));
+          transition_set.insert_action(term.clone(), Action::Reduce(prod_ref));
         }
         ActionBuilder::Terminate(prod_ref) => {
-          transition_set
-            .action_map
-            .insert(term.clone(), Action::Terminate(prod_ref));
+          transition_set.insert_action(term.clone(), Action::Terminate(prod_ref));
         }
       }
     }

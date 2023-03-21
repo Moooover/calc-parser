@@ -279,6 +279,7 @@ impl<'a> CodeGen<'a> {
   fn generate_dfa_transitions(
     &self,
     lr_entry: &Rc<LRTableEntry>,
+    ref_iter: bool,
   ) -> ParseResult<proc_macro2::TokenStream> {
     let lr_state = lr_entry.lr_state();
     let enum_variant = self.to_enum_variant(lr_state);
@@ -291,21 +292,41 @@ impl<'a> CodeGen<'a> {
     // more difficult, maybe can do with just default/auto gen constructors).
     lr_state.transitions.action_map.iter().try_fold(
       proc_macro2::TokenStream::new(),
-      |tokens, (term, action)| {
-        let term_pattern = term.as_peek_pattern();
-
+      |tokens, (action, terms)| {
         let match_tokens = match action {
           Action::Shift(lr_table_entry) => {
+            let term_patterns = terms
+              .iter()
+              .fold(None, |tokens, term| {
+                debug_assert!(!term.is_end_of_stream());
+                let term_sym = term.as_sym_tokens();
+
+                Some(match tokens {
+                  Some(tokens) => quote! {
+                    #tokens | (#enum_variant, Some(&_term_val @ #term_sym))
+                  },
+                  None => quote! {
+                    (#enum_variant, Some(&_term_val @ #term_sym))
+                  },
+                })
+              })
+              .unwrap();
+
             let next_lr_state = lr_table_entry.lr_state();
             let next_state = self.to_enum_inst(next_lr_state);
-            let sym_tokens = term.as_sym_tokens();
+            // let sym_tokens = term.as_sym_tokens();
+            let term_val_tokens = if ref_iter {
+              quote! { *_term_val }
+            } else {
+              quote! { _term_val }
+            };
 
             ParseResult::Ok(quote! {
-              (#enum_variant, #term_pattern) => {
-                println!("Consuming {}", #sym_tokens);
+              #term_patterns => {
+                println!("Consuming");
                 // Consume the token.
                 input_stream.next();
-                states.push(#next_state(#sym_tokens));
+                states.push(#next_state(#term_val_tokens));
               }
             })
           }
@@ -425,9 +446,24 @@ impl<'a> CodeGen<'a> {
 
             // eprintln!("{}", goto_or_return.to_string());
             // eprintln!("cons: {}", constructor);
+            let term_patterns = terms
+              .iter()
+              .fold(None, |tokens, term| {
+                let term_peek_pattern = term.as_peek_pattern();
+
+                Some(match tokens {
+                  Some(tokens) => quote! {
+                    #tokens | (#enum_variant, #term_peek_pattern)
+                  },
+                  None => quote! {
+                    (#enum_variant, #term_peek_pattern)
+                  },
+                })
+              })
+              .unwrap();
 
             ParseResult::Ok(quote! {
-              (#enum_variant, #term_pattern) => {
+              #term_patterns => {
                 println!("Got to this guy!");
                 #var_builders
                 let cons = #cons_tokens;
@@ -439,7 +475,7 @@ impl<'a> CodeGen<'a> {
 
         // End of stream must be placed at the end of the match, since `_` is a
         // catch-all, and match branches match based on declaration order.
-        ParseResult::Ok(if term.is_end_of_stream() {
+        ParseResult::Ok(if terms.iter().any(|term| term.is_end_of_stream()) {
           quote! {
             #tokens
             #match_tokens
@@ -454,12 +490,12 @@ impl<'a> CodeGen<'a> {
     )
   }
 
-  fn generate_match_loop(&self) -> ParseResult<proc_macro2::TokenStream> {
+  fn generate_match_loop(&self, ref_iter: bool) -> ParseResult<proc_macro2::TokenStream> {
     let initial_state = self.to_enum_variant(self.lr_table.initial_state.lr_state());
     let state_transitions = self.lr_table.states.iter().try_fold(
       proc_macro2::TokenStream::new(),
       |tokens, lr_entry| {
-        let dfa_state = self.generate_dfa_transitions(lr_entry)?;
+        let dfa_state = self.generate_dfa_transitions(lr_entry, ref_iter)?;
         ParseResult::Ok(quote! {
           #dfa_state,
           #tokens
@@ -504,7 +540,8 @@ impl<'a> CodeGen<'a> {
     let root_type = &self.root_type;
 
     let states = self.generate_dfa_states();
-    let match_loop = self.generate_match_loop()?;
+    let match_loop = self.generate_match_loop(false)?;
+    let match_loop_ref = self.generate_match_loop(true)?;
 
     ParseResult::Ok(quote! {
       #[derive(Debug)]
@@ -524,7 +561,7 @@ impl<'a> CodeGen<'a> {
         pub fn parse_ref<'a, I: Iterator<Item = &'a #terminal_type>>(
           mut input_stream: std::iter::Peekable<I>,
         ) -> Option<(#root_type, std::iter::Peekable<I>)> {
-          #match_loop
+          #match_loop_ref
         }
 
         /// Parses an input stream according to the grammar, returning the

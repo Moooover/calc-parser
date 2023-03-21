@@ -541,80 +541,33 @@ fn main() {
   //   None => println!("no match :("),
   // }
 
-  // parser_generator_impl::grammar_def! {
-  //   name: Test;
-  //   terminal: char;
-
-  //   <S>: u32 => <A> { #A };
-  //   <A>: u32 => <A> '+' <P> {
-  //     #A + #P
-  //   } | <P> {
-  //     #P
-  //   };
-  //   <P>: u32 => <P> '*' <V> {
-  //     #P * #V
-  //   } | <V> {
-  //     #V
-  //   };
-  //   <V>: u32 => '1' { 1 } | '2' { 2 };
-  // };
-
-  // let res = Test::parse("2*2+1".chars().into_iter().peekable());
-
-  // match res {
-  //   Some((i, _)) => println!("Result: {}", i),
-  //   None => println!("no match :("),
-  // }
-
-  #[derive(Debug, PartialEq, Eq)]
-  enum RequestType {
-    GET,
-    HEAD,
-  }
-
-  #[derive(Debug, PartialEq, Eq)]
-  struct Req {
-    req_type: RequestType,
-    uri: String,
-  }
-
-  impl Req {
-    pub fn new(req_type: RequestType, uri: String) -> Self {
-      Self { req_type, uri }
-    }
-  }
-
   parser_generator_impl::grammar_def! {
-    name: GetReq;
+    name: Test;
     terminal: char;
 
-    // if no {} given, return entire consumed text.
-    // a re before text means to treat the text as regex.
-    <absoluteURI>: String => ':' <alphas> {
-      #1.to_string() + &#alphas
+    <S>: u32 => <A> { #A };
+    <A>: u32 => <A> '+' <P> {
+      #A + #P
+    } | <P> {
+      #P
     };
-    <req>: RequestType => 'G' 'E' 'T' { RequestType::GET }
-          | 'H' 'E' 'A' 'D' { RequestType::HEAD };
-    <uri>: String => <absoluteURI>;
-    <header>: Req => <req> ' ' <uri> {
-      Req::new(#req, #uri)
+    <P>: u32 => <P> '*' <V> {
+      #P * #V
+    } | <V> {
+      #V
     };
+    <V>: u32 => <V> <dig> {
+      10 * #V + #dig.to_digit(10).unwrap()
+    } | <dig> {
+      #dig.to_digit(10).unwrap()
+    };
+    <dig>: char => '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+  };
 
-    <alphas>: String => <alphas> <alpha> {
-      #alphas + &#alpha.to_string()
-    } | <alpha> {
-      #alpha.to_string()
-    };
-    <alpha>: char =>
-        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
-      | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
-      | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
-  }
-
-  let res = GetReq::parse("GET :testguy".chars().into_iter().peekable());
+  let res = Test::parse("21*42+1000".chars().into_iter().peekable());
 
   match res {
-    Some((i, _)) => println!("Result: {:?}", i),
+    Some((i, _)) => println!("Result: {}", i),
     None => println!("no match :("),
   }
 

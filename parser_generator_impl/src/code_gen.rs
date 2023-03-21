@@ -286,8 +286,25 @@ impl<'a> CodeGen<'a> {
 
     // eprintln!("{}: {lr_state} ({enum_variant})", enum_variant.to_string());
 
-    // TODO combine transitions with the same action into branches (p1 | p2 | ...)
-    // do the same with gotos
+    // TODO: combine states which have an identical transition set AND construction.
+    // i.e. if you have
+    // <A>: char => <B> 'a' | <B> 'b';
+    // The states:
+    // [<A> => <B> 'a' ., 'a'/'b']
+    // [<A> => <B> 'b' ., 'a'/'b']
+    // Can be combined into one, as can
+    // [<A> => <B> . 'a', 'a'/'b']
+    // [<A> => <B> . 'b', 'a'/'b']
+    // since both here will push an 'a' to the stack if it's the next lookahead
+    // and transition to the other merged state, and they both reduce to A in
+    // the same way (using default constructors).
+    //
+    // It won't be possible to determine equivalence of constructors if they're
+    // user defined, so those will always compare to false.
+    //
+    // Will need to iteratively do this until no more reductions can be made,
+    // since some reductions may make others available (like the above example).
+
     // later TODO: combine states who have the same constructor (this will be
     // more difficult, maybe can do with just default/auto gen constructors).
     lr_state.transitions.action_map.iter().try_fold(

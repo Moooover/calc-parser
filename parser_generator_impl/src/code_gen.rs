@@ -323,7 +323,7 @@ impl<'a> CodeGen<'a> {
 
             ParseResult::Ok(quote! {
               #term_patterns => {
-                println!("Consuming");
+                // println!("Consuming");
                 // Consume the token.
                 input_stream.next();
                 states.push(#next_state(#term_val_tokens));
@@ -368,9 +368,9 @@ impl<'a> CodeGen<'a> {
                   #tokens
                   let #var_name = match states.pop() {
                     #variants
-                    _ => unreachable!(),
+                    _ => unsafe { std::hint::unreachable_unchecked() },
                   };
-                  println!("Set {} to {:?}", #var_str, #var_name);
+                  // println!("Set {} to {:?}", #var_str, #var_name);
                 }
               },
             );
@@ -408,7 +408,7 @@ impl<'a> CodeGen<'a> {
                   quote! {
                     #tokens
                     Some(#parent_enum_variant) => {
-                      println!("Going to {}", #evstr);
+                      // println!("Going to {}", #evstr);
                       states.push(#next_enum_variant(cons));
                     }
                   }
@@ -418,7 +418,7 @@ impl<'a> CodeGen<'a> {
               quote! {
                 match states.last() {
                   #goto_transitions
-                  _ => unreachable!(),
+                  _ => unsafe { std::hint::unreachable_unchecked() },
                 }
               }
             };
@@ -464,7 +464,7 @@ impl<'a> CodeGen<'a> {
 
             ParseResult::Ok(quote! {
               #term_patterns => {
-                println!("Got to this guy!");
+                // println!("Got to this guy!");
                 #var_builders
                 let cons = #cons_tokens;
                 #goto_or_return
@@ -509,11 +509,11 @@ impl<'a> CodeGen<'a> {
         let state = states.last().unwrap();
         let next_token = input_stream.peek();
 
-        for s in states.iter() {
-          print!("{:?} ", s);
-        }
-        println!("");
-        println!("Matching ({:?}, {:?})", state, next_token);
+        // for s in states.iter() {
+        //   print!("{:?} ", s);
+        // }
+        // println!("");
+        // println!("Matching ({:?}, {:?})", state, next_token);
 
         match (state, next_token) {
           #state_transitions

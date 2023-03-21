@@ -605,7 +605,17 @@ fn main() {
     } | <alpha> {
       #alpha.to_string()
     };
-    <alpha>: char => 'a' | 'b' | 'c';
+    <alpha>: char =>
+        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
+      | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+      | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
+  }
+
+  let res = GetReq::parse("GET :testguy".chars().into_iter().peekable());
+
+  match res {
+    Some((i, _)) => println!("Result: {:?}", i),
+    None => println!("no match :("),
   }
 
   /*

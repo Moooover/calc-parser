@@ -638,7 +638,7 @@ impl Closure {
       }
     }
 
-    eprintln!("transitionz: {}", transitions);
+    // eprintln!("transitionz: {}", transitions);
 
     Ok(transitions)
   }
@@ -921,7 +921,7 @@ impl LRTable {
     assert!(states.insert(lr_state.clone()));
 
     let closure = Closure::from_lr_states(lr_state_builder, first_table);
-    eprintln!("\tclozure: {}", closure);
+    // eprintln!("\tclozure: {}", closure);
     let transitions = closure.transitions(grammar)?;
 
     let mut transition_set = TransitionSet::new();
@@ -1015,7 +1015,10 @@ impl LRTable {
 
 impl Display for LRTable {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-    for state in self.states.iter() {
+    let mut states = self.states.iter().collect::<Vec<_>>();
+    states.sort_by(|s1, s2| s1.lr_state().uid.cmp(&s2.lr_state().uid));
+
+    for state in states.iter() {
       write!(f, "state {}: {}\n", state.lr_state().uid, state)?;
     }
     Ok(())

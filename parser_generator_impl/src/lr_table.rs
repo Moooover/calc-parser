@@ -803,20 +803,26 @@ impl TransitionSet {
   }
 
   fn update_refs(&mut self, ref_map: &StateMap) {
-    self.action_map = self
+    let mut action_map: BTreeMap<Action, BTreeSet<Terminal>> = BTreeMap::new();
+    self
       .action_map
       .clone()
       .into_iter()
-      .map(|(action, terms)| {
-        (
-          match action {
-            Action::Shift(lr_table_entry) => Action::Shift(ref_map.remap(lr_table_entry)),
-            action @ Action::Reduce(_) | action @ Action::Terminate(_) => action,
-          },
-          terms,
-        )
-      })
-      .collect();
+      .for_each(|(action, terms)| {
+        let action = match action {
+          Action::Shift(lr_table_entry) => Action::Shift(ref_map.remap(lr_table_entry)),
+          action @ Action::Reduce(_) | action @ Action::Terminate(_) => action,
+        };
+
+        let terms = if let Some(mut other_terms) = action_map.remove(&action) {
+          other_terms.extend(terms);
+          other_terms
+        } else {
+          terms
+        };
+        action_map.insert(action, terms);
+      });
+    self.action_map = action_map;
     self.goto_map = self
       .goto_map
       .clone()

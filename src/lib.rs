@@ -152,21 +152,17 @@ mod tests {
     } | <alpha> {
       #alpha.to_string()
     };
-    <alpha>: char => 'a' | 'b' | 'c';
-    // <alpha>: char =>
-    //     'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
-    //   | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
-    //   | 'u' | 'v' | 'w' | 'x' | 'y' | 'z'
-    //   | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'
-    //   | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T'
-    //   | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
+    <alpha>: char =>
+        'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
+      | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+      | 'u' | 'v' | 'w' | 'x' | 'y' | 'z';
   }
 
   #[test]
   fn test_parse_uri() {
     assert_full_evaluates!(
-      GetReq::parse(char_iter!("GET :abba")),
-      Req::new(RequestType::GET, ":abba".to_string())
+      GetReq::parse(char_iter!("GET :abcdefgh")),
+      Req::new(RequestType::GET, ":abcdefgh".to_string())
     );
   }
 }

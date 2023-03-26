@@ -916,6 +916,60 @@ impl ProductionRules {
     self.span.span()
   }
 
+  /// Hash function considering only the types of elements in the rules list,
+  /// not particular values (i.e. terminals are considered equal, production
+  /// rule refs are equal if they are refs to the same production rule).
+  pub fn construction_pattern_hash<H: Hasher>(&self, state: &mut H) {
+    for rule in &self.rules {
+      match rule {
+        ProductionRule::Intermediate(prod_rule_ref) => {
+          state.write_u64(0);
+          prod_rule_ref.hash(state);
+        }
+        ProductionRule::Terminal(_term) => {
+          // All terminals are considered equal, since they're referenced the
+          // same way in constructors.
+          state.write_u64(1);
+        }
+      }
+    }
+    self.constructor.hash(state);
+  }
+
+  /// Equality comparison function considering only the types of elements in the
+  /// rules list, not particular values (i.e. terminals are considered equal,
+  /// production rule refs are equal if they are refs to the same production
+  /// rule).
+  pub fn construction_pattern_eq(&self, other: &ProductionRules) -> bool {
+    if self.rules.len() != other.rules.len() {
+      return false;
+    }
+
+    if !self
+      .rules
+      .iter()
+      .zip(other.rules.iter())
+      .all(|(rule1, rule2)| {
+        match (rule1, rule2) {
+          (
+            ProductionRule::Intermediate(prod_rule_ref1),
+            ProductionRule::Intermediate(prod_rule_ref2),
+          ) => prod_rule_ref1 == prod_rule_ref2,
+          (ProductionRule::Terminal(_term1), ProductionRule::Terminal(_term2)) => {
+            // All terminals are considered equal, since they're referenced the
+            // same way in constructors.
+            true
+          }
+          _ => false,
+        }
+      })
+    {
+      return false;
+    }
+
+    return self.constructor == other.constructor;
+  }
+
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
     let mut rules = Vec::<ProductionRule>::new();
     let mut span: Option<Span> = None;
@@ -1028,6 +1082,10 @@ impl ProductionRuleRef {
 
   pub fn prod_ref(&self) -> &ProductionRef {
     &self.prod_ref
+  }
+
+  pub fn prod_ptr(&self) -> &Rc<Production> {
+    &self.prod_ptr
   }
 
   pub fn rules(&self) -> &ProductionRules {

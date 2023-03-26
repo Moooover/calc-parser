@@ -628,7 +628,7 @@ impl ProductionRef {
     ProductionRuleRef::new(
       self.clone(),
       rule_idx,
-      self.deref().rules().get(rule_idx as usize).unwrap().span,
+      self.deref().rules().get(rule_idx as usize).unwrap().span(),
     )
   }
 
@@ -781,7 +781,7 @@ impl Display for ProductionRef {
 }
 
 // <ProductionRule> => <ProductionRef> | <TerminalSym>
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ProductionRule {
   Intermediate(ProductionRef),
   Terminal(Terminal),
@@ -831,19 +831,23 @@ impl Display for ProductionRule {
   }
 }
 
+// <Constructor> => proc_macro::Group
 #[derive(Clone, Debug)]
 pub struct Constructor {
   pub group: proc_macro::Group,
-  span: Span,
+  span: TransparentSpan,
 }
 
 impl Constructor {
   pub fn new(group: proc_macro::Group, span: Span) -> Self {
-    Self { group, span }
+    Self {
+      group,
+      span: span.into(),
+    }
   }
 
   pub fn span(&self) -> Span {
-    self.span
+    self.span.span()
   }
 }
 
@@ -852,9 +856,23 @@ impl std::default::Default for Constructor {
   fn default() -> Self {
     Self {
       group: proc_macro::Group::new(proc_macro::Delimiter::Brace, quote! { () }.into()),
-      span: proc_macro::Span::call_site(),
+      span: proc_macro::Span::call_site().into(),
     }
   }
+}
+
+impl PartialEq for Constructor {
+  // There is no meaningful way to compare constructors.
+  fn eq(&self, _other: &Self) -> bool {
+    false
+  }
+}
+
+impl Eq for Constructor {}
+
+impl Hash for Constructor {
+  // Hash for constructor is a no-op.
+  fn hash<H: Hasher>(&self, _state: &mut H) {}
 }
 
 impl Display for Constructor {
@@ -863,12 +881,12 @@ impl Display for Constructor {
   }
 }
 
-// <ProductionRules> => <ProductionRule> <ProductionRules>? | <Constructor>
-#[derive(Clone, Debug)]
+// <ProductionRules> => <ProductionRule> <ProductionRules>? <Constructor>
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ProductionRules {
   pub rules: Vec<ProductionRule>,
   pub constructor: Option<Constructor>,
-  pub span: Span,
+  span: TransparentSpan,
 }
 
 impl ProductionRules {
@@ -876,7 +894,7 @@ impl ProductionRules {
     Self {
       rules,
       constructor,
-      span,
+      span: span.into(),
     }
   }
 
@@ -892,6 +910,10 @@ impl ProductionRules {
     } else {
       return Some(&self.rules[pos]);
     }
+  }
+
+  pub fn span(&self) -> Span {
+    self.span.span()
   }
 
   pub fn parse<T: Iterator<Item = Symbol>>(iter: &mut Peekable<T>) -> ParseResult<Self> {
@@ -956,7 +978,7 @@ impl ProductionRules {
         .filter(|rule| !rule.is_epsilon())
         .collect(),
       constructor,
-      span: span.unwrap(),
+      span: span.unwrap().into(),
     });
   }
 }
@@ -1090,7 +1112,7 @@ impl Production {
     let span = span_join!(
       production_name.span,
       arrow_span,
-      iter_span(production_rules_list.iter().map(|rules| rules.span)),
+      iter_span(production_rules_list.iter().map(|rules| rules.span())),
       semicolon_span
     );
 
@@ -1338,7 +1360,7 @@ impl Grammar {
         new_rules_list.push(ProductionRules::new(
           new_rule_list,
           prod.constructor.clone(),
-          prod.span,
+          prod.span(),
         ));
       }
 

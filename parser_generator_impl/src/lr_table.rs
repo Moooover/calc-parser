@@ -1,5 +1,5 @@
 use proc_macro::Span;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
@@ -316,7 +316,7 @@ impl Display for ProductionState {
   }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LRStateBuilder {
   pub states: BTreeSet<ProductionState>,
 }
@@ -330,6 +330,10 @@ impl LRStateBuilder {
 
   fn insert(&mut self, state: ProductionState) -> bool {
     self.states.insert(state)
+  }
+
+  fn merge(&mut self, other: LRStateBuilder) {
+    self.states.extend(other.states);
   }
 }
 
@@ -656,6 +660,7 @@ impl Display for Closure {
   }
 }
 
+#[derive(Clone)]
 pub enum LRTableEntry {
   Resolved(LRState),
   Unresolved(LRStateBuilder),
@@ -710,6 +715,20 @@ impl PartialEq for LRTableEntry {
 
 impl Eq for LRTableEntry {}
 
+impl PartialOrd for LRTableEntry {
+  fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    self
+      .state_builder_ref()
+      .partial_cmp(other.state_builder_ref())
+  }
+}
+
+impl Ord for LRTableEntry {
+  fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    self.state_builder_ref().cmp(other.state_builder_ref())
+  }
+}
+
 impl Display for LRTableEntry {
   fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
     match self {
@@ -719,7 +738,7 @@ impl Display for LRTableEntry {
   }
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Action {
   Shift(Rc<LRTableEntry>),
   Reduce(ProductionRuleRef),
@@ -751,24 +770,27 @@ impl Display for Action {
   }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct TransitionSet {
-  pub action_map: HashMap<Action, Vec<Terminal>>,
-  pub goto_map: HashMap<ProductionRef, Rc<LRTableEntry>>,
+  pub action_map: BTreeMap<Action, BTreeSet<Terminal>>,
+  pub goto_map: BTreeMap<ProductionRef, Rc<LRTableEntry>>,
 }
 
 impl TransitionSet {
   fn new() -> Self {
     Self {
-      action_map: HashMap::new(),
-      goto_map: HashMap::new(),
+      action_map: BTreeMap::new(),
+      goto_map: BTreeMap::new(),
     }
   }
 
   fn insert_action(&mut self, term: Terminal, action: Action) {
     if let Some(terminals) = self.action_map.get_mut(&action) {
-      terminals.push(term);
+      terminals.insert(term);
     } else {
-      self.action_map.insert(action, vec![term]);
+      let mut terms = BTreeSet::new();
+      terms.insert(term);
+      self.action_map.insert(action, terms);
     }
   }
 }
@@ -820,6 +842,7 @@ impl Display for TransitionSet {
   }
 }
 
+#[derive(Clone)]
 pub struct LRState {
   pub states: LRStateBuilder,
   pub transitions: TransitionSet,
@@ -862,8 +885,10 @@ impl LRState {
     repr_state.prev_sym()
   }
 
-  pub fn is_initial_state(&self) -> bool {
-    self.parent_states.is_empty()
+  /// Merges two lr states, assuming their transition sets are already identical.
+  pub fn merge(&mut self, other: LRState) {
+    self.states.merge(other.states);
+    self.parent_states.extend(other.parent_states);
   }
 }
 
@@ -982,6 +1007,51 @@ impl LRTable {
     return Ok(lr_state);
   }
 
+  /// Merge all states which have the same transition set iteratively, until
+  /// no more merges can be done.
+  fn merge_redundant_states(states: &mut HashSet<Rc<LRTableEntry>>) {
+    let mut transition_set_map: HashMap<TransitionSet, Rc<LRTableEntry>> = HashMap::new();
+    let mut remapped_states: HashMap<Rc<LRTableEntry>, Rc<LRTableEntry>> = HashMap::new();
+
+    // TODO transitions inequal b/c ProductionRef differentiates based on
+    // rule_idx. Need it to differentiate by constructor.
+    states.iter().for_each(|lr_table_entry| {
+      if let Some((transition_set, other_entry)) =
+        transition_set_map.remove_entry(&lr_table_entry.lr_state().transitions)
+      {
+        let mut new_entry = other_entry.as_ref().clone();
+        new_entry
+          .lr_state_mut()
+          .merge(lr_table_entry.lr_state().clone());
+        let new_entry = Rc::new(new_entry);
+        transition_set_map.insert(transition_set, new_entry.clone());
+
+        // if let Some(x) = remapped_states.remove(&other_entry) {
+        //   // If other_entry already has a remap, then map to it's remapped state instead.
+        // }
+        remapped_states.insert(lr_table_entry.clone(), new_entry.clone());
+        remapped_states.insert(other_entry, new_entry.clone());
+      } else {
+        transition_set_map.insert(
+          lr_table_entry.lr_state().transitions.clone(),
+          lr_table_entry.clone(),
+        );
+      }
+    });
+
+    eprintln!("trans set map:");
+    transition_set_map.iter().for_each(|(trans_set, lr_entry)| {
+      let mut hasher = std::collections::hash_map::DefaultHasher::new();
+      trans_set.hash(&mut hasher);
+      eprintln!("{} ({})", lr_entry, hasher.finish());
+    });
+    eprintln!("remapped states:");
+    remapped_states.iter().for_each(|(e1, e2)| {
+      eprintln!("{} -> {}", e1, e2);
+    });
+    eprintln!("Done");
+  }
+
   pub fn from_grammar(grammar: &Grammar) -> ParseResult<Self> {
     let init_state_ptr = grammar.starting_rule();
 
@@ -1005,6 +1075,8 @@ impl LRTable {
       None,
       &mut next_uid,
     )?;
+
+    Self::merge_redundant_states(&mut states);
 
     Ok(Self {
       states,

@@ -802,18 +802,20 @@ impl TransitionSet {
     }
   }
 
-  fn update_refs(&mut self, ref_map: &StateMap) {
+  fn update_refs(&mut self, ref_map: &mut StateMap) {
     let mut action_map: BTreeMap<Action, BTreeSet<Terminal>> = BTreeMap::new();
     self
       .action_map
       .clone()
       .into_iter()
       .for_each(|(action, terms)| {
+        eprintln!("Remapping {}", action);
         let action = match action {
           Action::Shift(lr_table_entry) => Action::Shift(ref_map.remap(lr_table_entry)),
           action @ Action::Reduce(_) | action @ Action::Terminate(_) => action,
         };
 
+        eprintln!("insert/remove");
         let terms = if let Some(mut other_terms) = action_map.remove(&action) {
           other_terms.extend(terms);
           other_terms
@@ -823,6 +825,7 @@ impl TransitionSet {
         action_map.insert(action, terms);
       });
     self.action_map = action_map;
+    eprintln!("Remapping goto map");
     self.goto_map = self
       .goto_map
       .clone()
@@ -928,13 +931,15 @@ impl LRState {
     self.parent_states.extend(other.parent_states);
   }
 
-  fn update_refs(&mut self, ref_map: &StateMap) {
+  fn update_refs(&mut self, ref_map: &mut StateMap) {
+    eprintln!("update parent state refs");
     self.parent_states = self
       .parent_states
       .clone()
       .into_iter()
       .map(|lr_table_entry| ref_map.remap(lr_table_entry))
       .collect();
+    eprintln!("update transitions refs");
     self.transitions.update_refs(ref_map);
   }
 }
@@ -1101,9 +1106,13 @@ impl StateMap {
     self.map.insert(from, to);
   }
 
-  fn remap(&self, mut entry: Rc<LRTableEntry>) -> Rc<LRTableEntry> {
+  fn remap(&mut self, mut entry: Rc<LRTableEntry>) -> Rc<LRTableEntry> {
     while let Some(remap) = self.map.get(&entry) {
-      entry = remap.clone();
+      let remap = remap.clone();
+      if let Some(parent) = self.map.get(&remap) {
+        self.map.insert(entry, parent.clone());
+      }
+      entry = remap;
     }
     entry
   }
@@ -1220,9 +1229,11 @@ impl LRTable {
 
       self.states.iter().for_each(|lr_table_entry| {
         let transition_set: TransitionSet2 = lr_table_entry.lr_state().transitions.clone().into();
+        // eprintln!("Processing {}", transition_set.transition_set);
         if let Some((transition_set, other_entry)) =
           transition_set_map.remove_entry(&transition_set)
         {
+          // eprintln!("cloning");
           let mut new_entry = other_entry.as_ref().clone();
           new_entry
             .lr_state_mut()
@@ -1232,7 +1243,9 @@ impl LRTable {
           //   "MERGING ENTRIES: {} + {} = {}",
           //   other_entry, lr_table_entry, new_entry
           // );
+          // eprintln!("inserting");
           transition_set_map.insert(transition_set, new_entry.clone());
+          // eprintln!("done");
 
           // if let x = remapped_states.remap(other_entry.clone()) {
           //   // If other_entry already has a remap, then map to it's remapped state instead.
@@ -1240,13 +1253,16 @@ impl LRTable {
           remapped_states.insert(lr_table_entry.clone(), new_entry.clone());
           remapped_states.insert(other_entry, new_entry.clone());
         } else {
+          // eprintln!("cloning/inserting");
           transition_set_map.insert(
             lr_table_entry.lr_state().transitions.clone().into(),
             lr_table_entry.clone(),
           );
+          // eprintln!("done");
         }
       });
 
+      // eprintln!("checking remapped states");
       if remapped_states.is_empty() {
         break;
       }
@@ -1264,17 +1280,21 @@ impl LRTable {
       // Clear so the rc's in the map are unreferenced.
       transition_set_map.clear();
 
+      // eprintln!("redoing new states");
       let new_states = self
         .states
         .clone()
         .into_iter()
         .map(|state| {
+          // eprintln!("remapping");
           let mut state = remapped_states.remap(state);
           let state_ref = unsafe { Rc::get_mut_unchecked(&mut state) };
-          state_ref.lr_state_mut().update_refs(&remapped_states);
+          // eprintln!("update refs");
+          state_ref.lr_state_mut().update_refs(&mut remapped_states);
           state
         })
         .collect::<HashSet<_>>();
+      // eprintln!("reindexing");
       self.states = new_states
         .into_iter()
         .enumerate()
@@ -1284,6 +1304,7 @@ impl LRTable {
           state
         })
         .collect();
+      // eprintln!("done");
       self.initial_state = remapped_states.remap(self.initial_state.clone());
     }
   }
@@ -1303,6 +1324,7 @@ impl LRTable {
     let mut first_table = ProductionFirstTable::new();
     let mut next_uid = 0u64;
 
+    eprintln!("Calculate transitions");
     let initial_state = Self::calculate_transitions(
       &mut states,
       grammar,
@@ -1316,7 +1338,9 @@ impl LRTable {
       states,
       initial_state,
     };
+    eprintln!("merge redundant states ({})", lr_table.states.len());
     lr_table.merge_redundant_states();
+    eprintln!("merged, now {}", lr_table.states.len());
 
     Ok(lr_table)
   }

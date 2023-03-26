@@ -663,3 +663,460 @@ fn main() {
 // unreachable!()
 // <\[_\]>::into_vec\([\s\r]*#\[rustc_box\][\s\r]*::alloc::boxed::Box::new\((\[[^\]]+\])\),[\s\r]*\)
 // vec!$1
+
+fn main2() {
+  #[derive(Debug)]
+  enum TestDfaStates {
+    S10(char),
+    S2(char),
+    S9,
+    S7(char),
+    S6(u32),
+    S0(u32),
+    S4(u32),
+    S1(char),
+    S3(char),
+    S8(u32),
+    S5(u32),
+    T(u32),
+  }
+  struct Test {}
+  impl Test {
+    /// Parses an input stream according to the grammar, returning the
+    /// constructed object from a correctly formatted input, or None if the
+    /// input was not a sentential form of the grammar.
+    ///
+    /// This variant of parse uses an iterator over references to the
+    /// terminal type.
+    pub fn parse_ref<'a, I: Iterator<Item = &'a char>>(
+      mut input_stream: std::iter::Peekable<I>,
+    ) -> Option<(u32, std::iter::Peekable<I>)> {
+      let mut states = vec![TestDfaStates::S9];
+      loop {
+        let state = states.last().unwrap();
+        let next_token = input_stream.peek();
+        match (state, next_token) {
+          (TestDfaStates::S10(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S10(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0.to_digit(10).unwrap() };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S5(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S2(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S2(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              Some(TestDfaStates::S5(_)) => {
+                states.push(TestDfaStates::S7(cons));
+              }
+              Some(TestDfaStates::S0(_)) => {
+                states.push(TestDfaStates::S7(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S9, Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(*_term_val));
+          }
+          (TestDfaStates::S7(_), _) => {
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S7(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S0(val)) => val,
+              Some(TestDfaStates::S5(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { 10 * v0 + v1.to_digit(10).unwrap() };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S5(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S6(_), Some(&_term_val @ '+')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S3(*_term_val));
+          }
+          (TestDfaStates::S6(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S6(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            return Some((cons, input_stream));
+          }
+          (TestDfaStates::S0(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(*_term_val));
+          }
+          (TestDfaStates::S0(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S0(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S8(cons));
+              }
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S4(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S4(_), Some(&_term_val @ '*')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S1(*_term_val));
+          }
+          (TestDfaStates::S4(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S4(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S6(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S1(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(*_term_val));
+          }
+          (TestDfaStates::S3(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(*_term_val));
+          }
+          (TestDfaStates::S8(_), Some(&_term_val @ '*')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S1(*_term_val));
+          }
+          (TestDfaStates::S8(_), _) => {
+            let v2 = match states.pop() {
+              Some(TestDfaStates::S8(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S3(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S6(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 + v2 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S6(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S5(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(*_term_val));
+          }
+          (TestDfaStates::S5(_), _) => {
+            let v2 = match states.pop() {
+              Some(TestDfaStates::S5(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S1(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S4(val)) => val,
+              Some(TestDfaStates::S8(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 * v2 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S4(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S8(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          _ => {
+            match next_token {
+              Some(token) => {
+                {
+                  eprint!("Unexpected token \"{0}\"\n", token);
+                };
+              }
+              None => {
+                {
+                  eprint!("Unexpected end of input\n");
+                };
+              }
+            }
+            return None;
+          }
+        }
+      }
+    }
+    /// Parses an input stream according to the grammar, returning the
+    /// constructed object from a correctly formatted input, or None if the
+    /// input was not a sentential form of the grammar.
+    pub fn parse<I: Iterator<Item = char>>(
+      mut input_stream: std::iter::Peekable<I>,
+    ) -> Option<(u32, std::iter::Peekable<I>)> {
+      let mut states = vec![TestDfaStates::S9];
+      loop {
+        let state = states.last().unwrap();
+        let next_token = input_stream.peek();
+        match (state, next_token) {
+          (TestDfaStates::S10(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S10(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0.to_digit(10).unwrap() };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S5(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S2(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S2(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S5(_)) => {
+                states.push(TestDfaStates::S7(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              Some(TestDfaStates::S0(_)) => {
+                states.push(TestDfaStates::S7(cons));
+              }
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S10(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S9, Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(_term_val));
+          }
+          (TestDfaStates::S7(_), _) => {
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S7(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S5(val)) => val,
+              Some(TestDfaStates::S0(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { 10 * v0 + v1.to_digit(10).unwrap() };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S0(cons));
+              }
+              Some(TestDfaStates::S1(_)) => {
+                states.push(TestDfaStates::S5(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S6(_), Some(&_term_val @ '+')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S3(_term_val));
+          }
+          (TestDfaStates::S6(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S6(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            return Some((cons, input_stream));
+          }
+          (TestDfaStates::S0(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(_term_val));
+          }
+          (TestDfaStates::S0(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S0(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S4(cons));
+              }
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S8(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S4(_), Some(&_term_val @ '*')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S1(_term_val));
+          }
+          (TestDfaStates::S4(_), _) => {
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S4(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S6(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S1(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(_term_val));
+          }
+          (TestDfaStates::S3(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(_term_val));
+          }
+          (TestDfaStates::S8(_), Some(&_term_val @ '*')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S1(_term_val));
+          }
+          (TestDfaStates::S8(_), _) => {
+            let v2 = match states.pop() {
+              Some(TestDfaStates::S8(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S3(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S6(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 + v2 };
+            match states.last() {
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S6(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          (TestDfaStates::S5(_), Some(&_term_val @ '9')) => {
+            input_stream.next();
+            states.push(TestDfaStates::S2(_term_val));
+          }
+          (TestDfaStates::S5(_), _) => {
+            let v2 = match states.pop() {
+              Some(TestDfaStates::S5(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v1 = match states.pop() {
+              Some(TestDfaStates::S1(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let v0 = match states.pop() {
+              Some(TestDfaStates::S4(val)) => val,
+              Some(TestDfaStates::S8(val)) => val,
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            };
+            let cons = { v0 * v2 };
+            match states.last() {
+              Some(TestDfaStates::S3(_)) => {
+                states.push(TestDfaStates::S8(cons));
+              }
+              Some(TestDfaStates::S9) => {
+                states.push(TestDfaStates::S4(cons));
+              }
+              _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+          }
+          _ => {
+            match next_token {
+              Some(token) => {
+                {
+                  eprint!("Unexpected token \"{0}\"\n", token);
+                };
+              }
+              None => {
+                {
+                  eprint!("Unexpected end of input\n");
+                };
+              }
+            }
+            return None;
+          }
+        }
+      }
+    }
+  }
+  let res = Test::parse("21*42+1000".chars().into_iter().peekable());
+  match res {
+    Some((i, _)) => {
+      print!("Result: {0}\n", i);
+    }
+    None => {
+      print!("no match :(\n");
+    }
+  }
+}

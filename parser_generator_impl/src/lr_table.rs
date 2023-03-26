@@ -764,8 +764,18 @@ impl Display for Action {
           _ => unreachable!(),
         }
       ),
-      Action::Reduce(prod_rule_ref) => write!(f, "reduce({})", prod_rule_ref.name()),
-      Action::Terminate(prod_rule_ref) => write!(f, "terminate({})", prod_rule_ref.name()),
+      Action::Reduce(prod_rule_ref) => write!(
+        f,
+        "reduce({}:{})",
+        prod_rule_ref.name(),
+        prod_rule_ref.rule_idx()
+      ),
+      Action::Terminate(prod_rule_ref) => write!(
+        f,
+        "terminate({}:{})",
+        prod_rule_ref.name(),
+        prod_rule_ref.rule_idx()
+      ),
     }
   }
 }
@@ -949,6 +959,54 @@ struct TransitionSet2 {
   transition_set: TransitionSet,
 }
 
+// impl TransitionSet2 {
+//   fn merge(&mut self, other: TransitionSet2) {
+//     // Only need to merge action_map, since goto_map must already be identical
+//     // between two TransitionSets being merged.
+//     other
+//       .transition_set
+//       .action_map
+//       .into_iter()
+//       .for_each(|(action, other_terms)| {
+//         if let Some(terms) = self.action_map.get_mut(&action) {
+//           terms.extend(other_terms);
+//         } else {
+//           self.action_map.insert(action, other_terms);
+//         }
+//       });
+//     if self.transition_set.action_map.len() != other.transition_set.action_map.len() {
+//       return false;
+//     }
+
+//     self
+//       .transition_set
+//       .action_map
+//       .iter()
+//       .zip(other.transition_set.action_map.iter())
+//       .all(
+//         |((action1, terms1), (action2, terms2))| match (action1, action2) {
+//           (Action::Shift(lr_table_entry1), Action::Shift(lr_table_entry2)) => {
+//             lr_table_entry1 == lr_table_entry2
+//           }
+//           (Action::Reduce(prod_rule_ref1), Action::Reduce(prod_rule_ref2)) => {
+//             prod_rule_ref1.prod_ptr() == prod_rule_ref2.prod_ptr()
+//               && prod_rule_ref1
+//                 .rules()
+//                 .construction_pattern_eq(prod_rule_ref2.rules())
+//           }
+//           (Action::Terminate(prod_rule_ref1), Action::Terminate(prod_rule_ref2)) => {
+//             prod_rule_ref1.prod_ptr() == prod_rule_ref2.prod_ptr()
+//               && prod_rule_ref1
+//                 .rules()
+//                 .construction_pattern_eq(prod_rule_ref2.rules())
+//           }
+//           _ => false,
+//         } && terms1 == terms2,
+//       )
+//       eprintln!("New trans set: {}", self);
+//   }
+// }
+
 impl From<TransitionSet> for TransitionSet2 {
   fn from(transition_set: TransitionSet) -> Self {
     Self { transition_set }
@@ -1027,6 +1085,10 @@ impl StateMap {
     Self {
       map: HashMap::new(),
     }
+  }
+
+  fn is_empty(&self) -> bool {
+    self.map.is_empty()
   }
 
   fn insert(&mut self, from: Rc<LRTableEntry>, to: Rc<LRTableEntry>) {
@@ -1146,73 +1208,78 @@ impl LRTable {
   /// Merge all states which have the same transition set iteratively, until
   /// no more merges can be done.
   fn merge_redundant_states(&mut self) {
-    let mut transition_set_map: HashMap<TransitionSet2, Rc<LRTableEntry>> = HashMap::new();
-    let mut remapped_states = StateMap::new();
+    loop {
+      let mut transition_set_map: HashMap<TransitionSet2, Rc<LRTableEntry>> = HashMap::new();
+      let mut remapped_states = StateMap::new();
 
-    // TODO transitions inequal b/c ProductionRef differentiates based on
-    // rule_idx. Need it to differentiate by constructor.
-    self.states.iter().for_each(|lr_table_entry| {
-      let transition_set: TransitionSet2 = lr_table_entry.lr_state().transitions.clone().into();
-      if let Some((transition_set, other_entry)) = transition_set_map.remove_entry(&transition_set)
-      {
-        let mut new_entry = other_entry.as_ref().clone();
-        new_entry
-          .lr_state_mut()
-          .merge(lr_table_entry.lr_state().clone());
-        let new_entry = Rc::new(new_entry);
-        eprintln!(
-          "MERGING ENTRIES: {} + {} = {}",
-          other_entry, lr_table_entry, new_entry
-        );
-        transition_set_map.insert(transition_set, new_entry.clone());
+      self.states.iter().for_each(|lr_table_entry| {
+        let transition_set: TransitionSet2 = lr_table_entry.lr_state().transitions.clone().into();
+        if let Some((transition_set, other_entry)) =
+          transition_set_map.remove_entry(&transition_set)
+        {
+          let mut new_entry = other_entry.as_ref().clone();
+          new_entry
+            .lr_state_mut()
+            .merge(lr_table_entry.lr_state().clone());
+          let new_entry = Rc::new(new_entry);
+          // eprintln!(
+          //   "MERGING ENTRIES: {} + {} = {}",
+          //   other_entry, lr_table_entry, new_entry
+          // );
+          transition_set_map.insert(transition_set, new_entry.clone());
 
-        // if let Some(x) = remapped_states.remove(&other_entry) {
-        //   // If other_entry already has a remap, then map to it's remapped state instead.
-        // }
-        remapped_states.insert(lr_table_entry.clone(), new_entry.clone());
-        remapped_states.insert(other_entry, new_entry.clone());
-      } else {
-        transition_set_map.insert(
-          lr_table_entry.lr_state().transitions.clone().into(),
-          lr_table_entry.clone(),
-        );
+          // if let x = remapped_states.remap(other_entry.clone()) {
+          //   // If other_entry already has a remap, then map to it's remapped state instead.
+          // }
+          remapped_states.insert(lr_table_entry.clone(), new_entry.clone());
+          remapped_states.insert(other_entry, new_entry.clone());
+        } else {
+          transition_set_map.insert(
+            lr_table_entry.lr_state().transitions.clone().into(),
+            lr_table_entry.clone(),
+          );
+        }
+      });
+
+      if remapped_states.is_empty() {
+        break;
       }
-    });
 
-    eprintln!("trans set map:");
-    transition_set_map.iter().for_each(|(trans_set, lr_entry)| {
-      let mut hasher = std::collections::hash_map::DefaultHasher::new();
-      trans_set.hash(&mut hasher);
-      eprintln!("{} ({})", lr_entry, hasher.finish());
-    });
-    eprintln!("remapped states:");
-    eprintln!("{}", remapped_states);
-    eprintln!("Done");
+      // eprintln!("trans set map:");
+      // transition_set_map.iter().for_each(|(trans_set, lr_entry)| {
+      //   let mut hasher = std::collections::hash_map::DefaultHasher::new();
+      //   trans_set.hash(&mut hasher);
+      //   eprintln!("{} ({})", lr_entry, hasher.finish());
+      // });
+      // eprintln!("remapped states:");
+      // eprintln!("{}", remapped_states);
+      // eprintln!("Done");
 
-    // Clear so the rc's in the map are unreferenced.
-    transition_set_map.clear();
+      // Clear so the rc's in the map are unreferenced.
+      transition_set_map.clear();
 
-    let new_states = self
-      .states
-      .clone()
-      .into_iter()
-      .map(|state| {
-        let mut state = remapped_states.remap(state);
-        let state_ref = unsafe { Rc::get_mut_unchecked(&mut state) };
-        state_ref.lr_state_mut().update_refs(&remapped_states);
-        state
-      })
-      .collect::<HashSet<_>>();
-    self.states = new_states
-      .into_iter()
-      .enumerate()
-      .map(|(idx, mut state)| {
-        let state_ref = unsafe { Rc::get_mut_unchecked(&mut state) };
-        state_ref.lr_state_mut().uid = idx as u64;
-        state
-      })
-      .collect();
-    self.initial_state = remapped_states.remap(self.initial_state.clone());
+      let new_states = self
+        .states
+        .clone()
+        .into_iter()
+        .map(|state| {
+          let mut state = remapped_states.remap(state);
+          let state_ref = unsafe { Rc::get_mut_unchecked(&mut state) };
+          state_ref.lr_state_mut().update_refs(&remapped_states);
+          state
+        })
+        .collect::<HashSet<_>>();
+      self.states = new_states
+        .into_iter()
+        .enumerate()
+        .map(|(idx, mut state)| {
+          let state_ref = unsafe { Rc::get_mut_unchecked(&mut state) };
+          state_ref.lr_state_mut().uid = idx as u64;
+          state
+        })
+        .collect();
+      self.initial_state = remapped_states.remap(self.initial_state.clone());
+    }
   }
 
   pub fn from_grammar(grammar: &Grammar) -> ParseResult<Self> {

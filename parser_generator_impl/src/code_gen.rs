@@ -463,21 +463,29 @@ impl<'a> CodeGen<'a> {
 
             // eprintln!("{}", goto_or_return.to_string());
             // eprintln!("cons: {}", constructor);
-            let term_patterns = terms
-              .iter()
-              .fold(None, |tokens, term| {
-                let term_peek_pattern = term.as_peek_pattern();
+            let term_patterns = if terms.iter().any(|term| term.is_end_of_stream()) {
+              quote! {
+                (#enum_variant, _)
+              }
+            } else {
+              terms
+                .iter()
+                .fold(None, |tokens, term| {
+                  let term_peek_pattern = term.as_peek_pattern();
 
-                Some(match tokens {
-                  Some(tokens) => quote! {
-                    #tokens | (#enum_variant, #term_peek_pattern)
-                  },
-                  None => quote! {
-                    (#enum_variant, #term_peek_pattern)
-                  },
+                  Some(match tokens {
+                    Some(tokens) => {
+                      quote! {
+                        #tokens | (#enum_variant, #term_peek_pattern)
+                      }
+                    }
+                    None => quote! {
+                      (#enum_variant, #term_peek_pattern)
+                    },
+                  })
                 })
-              })
-              .unwrap();
+                .unwrap()
+            };
 
             ParseResult::Ok(quote! {
               #term_patterns => {

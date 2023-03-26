@@ -1091,6 +1091,10 @@ impl ProductionRuleRef {
   pub fn rules(&self) -> &ProductionRules {
     self.prod_ptr.rules().get(self.rule_idx as usize).unwrap()
   }
+
+  pub fn rule_idx(&self) -> u32 {
+    self.rule_idx
+  }
 }
 
 impl Display for ProductionRuleRef {

@@ -5,6 +5,7 @@ mod code_gen;
 mod lr_table;
 mod production;
 mod symbol;
+mod unique_rc;
 mod util;
 
 use lr_table::LRTable;

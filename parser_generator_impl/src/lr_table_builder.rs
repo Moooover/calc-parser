@@ -811,13 +811,13 @@ impl TransitionSet {
       .clone()
       .into_iter()
       .for_each(|(action, terms)| {
-        eprintln!("Remapping {}", action);
+        // eprintln!("Remapping {}", action);
         let action = match action {
           Action::Shift(lr_table_entry) => Action::Shift(ref_map.remap(lr_table_entry)),
           action @ Action::Reduce(_) | action @ Action::Terminate(_) => action,
         };
 
-        eprintln!("insert/remove");
+        // eprintln!("insert/remove");
         let terms = if let Some(mut other_terms) = action_map.remove(&action) {
           other_terms.extend(terms);
           other_terms
@@ -827,7 +827,7 @@ impl TransitionSet {
         action_map.insert(action, terms);
       });
     self.action_map = action_map;
-    eprintln!("Remapping goto map");
+    // eprintln!("Remapping goto map");
     self.goto_map = self
       .goto_map
       .clone()
@@ -937,7 +937,7 @@ impl LRState {
   }
 
   fn update_refs(&mut self, ref_map: &mut StateMap) {
-    eprintln!("update parent state refs");
+    // eprintln!("update parent state refs");
     self.parent_states = self
       .parent_states
       .clone()
@@ -946,7 +946,7 @@ impl LRState {
       .map(|lr_table_entry| ref_map.remap(lr_table_entry))
       .collect::<HashSet<_>>()
       .into();
-    eprintln!("update transitions refs");
+    // eprintln!("update transitions refs");
     self.transitions.update_refs(ref_map);
   }
 }
@@ -1316,7 +1316,7 @@ impl LRTable {
     let mut first_table = ProductionFirstTable::new();
     let mut next_uid = 0u64;
 
-    eprintln!("Calculate transitions");
+    // eprintln!("Calculate transitions");
     let initial_state = Self::calculate_transitions(
       &mut states,
       grammar,
@@ -1330,9 +1330,9 @@ impl LRTable {
       states,
       initial_state,
     };
-    eprintln!("merge redundant states ({})", lr_table.states.len());
+    // eprintln!("merge redundant states ({})", lr_table.states.len());
     lr_table.merge_redundant_states();
-    eprintln!("merged, now {}", lr_table.states.len());
+    // eprintln!("merged, now {}", lr_table.states.len());
 
     Ok(lr_table)
   }

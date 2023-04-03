@@ -18,15 +18,15 @@ use symbol::Symbol;
 #[proc_macro]
 /// Constructs an LR(1) parser based on the definition provided.
 pub fn grammar_def(tokens: TokenStream) -> TokenStream {
-  eprintln!("tokenizing");
+  // eprintln!("tokenizing");
   let list = Symbol::from_stream(tokens);
-  eprintln!("parsing");
+  // eprintln!("parsing");
   let grammar = Grammar::from(list);
-  eprintln!("gen lr table");
+  // eprintln!("gen lr table");
   let lr_table = LRTable::from_grammar(&grammar).unwrap_or_else(|err| err.raise());
-  eprintln!("code gen");
+  // eprintln!("code gen");
   // eprintln!("{}", lr_table);
   let syn_tree = code_gen::to_match_loop(&grammar, &lr_table).unwrap_or_else(|err| err.raise());
-  eprintln!("done");
+  // eprintln!("done");
   return syn_tree.into();
 }

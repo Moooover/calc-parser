@@ -1,6 +1,6 @@
 use quote::{quote, ToTokens};
 
-use crate::lr_table::{Action, LRState, LRTable, LRTableEntry};
+use crate::lr_table_builder::{Action, LRState, LRTable, LRTableEntryBuilder};
 use crate::production::{Constructor, Grammar, ProductionRule, ProductionRules};
 use crate::util::{ParseError, ParseResult};
 use std::collections::HashMap;
@@ -278,7 +278,7 @@ impl<'a> CodeGen<'a> {
 
   fn generate_dfa_transitions(
     &self,
-    lr_entry: &Rc<LRTableEntry>,
+    lr_entry: &Rc<LRTableEntryBuilder>,
     ref_iter: bool,
   ) -> ParseResult<proc_macro2::TokenStream> {
     let lr_state = lr_entry.lr_state();
@@ -349,7 +349,7 @@ impl<'a> CodeGen<'a> {
           }
           Action::Reduce(prod_rule_ref) | Action::Terminate(prod_rule_ref) => {
             let rules = &prod_rule_ref.rules().rules;
-            let mut parent_states = LRTableEntry::as_parent_set(lr_entry);
+            let mut parent_states = LRTableEntryBuilder::as_parent_set(lr_entry);
 
             let cons_ctx = ConstructorContext::from_rules(prod_rule_ref.rules(), Self::unique_var);
 

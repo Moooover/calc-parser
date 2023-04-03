@@ -8,7 +8,7 @@ use std::iter::Peekable;
 use std::rc::{Rc, Weak};
 
 use crate::symbol::{Operator, Symbol, SymbolT};
-use crate::util::{ParseError, ParseResult};
+use crate::util::{ParseError, ParseResult, Transparent};
 
 macro_rules! span_join {
   ($s1:expr) => {
@@ -185,50 +185,50 @@ impl Display for ParserName {
   }
 }
 
-#[derive(Clone, Debug)]
-pub struct TransparentSpan {
-  span: Span,
-}
+// #[derive(Clone, Debug)]
+// pub struct TransparentSpan {
+//   span: Span,
+// }
 
-impl TransparentSpan {
-  pub fn span(&self) -> Span {
-    self.span
-  }
-}
+// impl TransparentSpan {
+//   pub fn span(&self) -> Span {
+//     self.span
+//   }
+// }
 
-impl From<Span> for TransparentSpan {
-  fn from(span: Span) -> Self {
-    Self { span }
-  }
-}
-impl Hash for TransparentSpan {
-  fn hash<H: Hasher>(&self, _state: &mut H) {}
-}
+// impl From<Span> for TransparentSpan {
+//   fn from(span: Span) -> Self {
+//     Self { span }
+//   }
+// }
+// impl Hash for TransparentSpan {
+//   fn hash<H: Hasher>(&self, _state: &mut H) {}
+// }
 
-impl PartialEq for TransparentSpan {
-  fn eq(&self, _other: &Self) -> bool {
-    true
-  }
-}
+// impl PartialEq for TransparentSpan {
+//   fn eq(&self, _other: &Self) -> bool {
+//     true
+//   }
+// }
 
-impl Eq for TransparentSpan {}
+// impl Eq for TransparentSpan {}
 
-impl PartialOrd for TransparentSpan {
-  fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-    Some(std::cmp::Ordering::Equal)
-  }
-}
+// impl PartialOrd for TransparentSpan {
+//   fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
+//     Some(std::cmp::Ordering::Equal)
+//   }
+// }
 
-impl Ord for TransparentSpan {
-  fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
-    std::cmp::Ordering::Equal
-  }
-}
+// impl Ord for TransparentSpan {
+//   fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
+//     std::cmp::Ordering::Equal
+//   }
+// }
 
 #[derive(Clone, Debug)]
 pub struct TerminalSym {
   pub tokens: TokenStream,
-  pub span: TransparentSpan,
+  pub span: Transparent<Span>,
 }
 
 impl Hash for TerminalSym {
@@ -246,7 +246,7 @@ impl Hash for TerminalSym {
         state.write_u64(5);
         punct.as_char().hash(state);
       }
-      _ => abort!(self.span.span(), "Unexpected token in terminal"),
+      _ => abort!(self.span, "Unexpected token in terminal"),
     });
   }
 }
@@ -297,18 +297,18 @@ impl Display for TerminalSym {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Terminal {
   // '$'
-  EndOfStream(TransparentSpan),
+  EndOfStream(Transparent<Span>),
   // '!'
-  Epsilon(TransparentSpan),
+  Epsilon(Transparent<Span>),
   Sym(TerminalSym),
 }
 
 impl Terminal {
   pub fn span(&self) -> Span {
     match self {
-      Terminal::EndOfStream(span) => span.span().clone(),
-      Terminal::Epsilon(span) => span.span().clone(),
-      Terminal::Sym(sym) => sym.span.span().clone(),
+      Terminal::EndOfStream(span) => span.clone().data(),
+      Terminal::Epsilon(span) => span.clone().data(),
+      Terminal::Sym(sym) => sym.span.clone().data(),
     }
   }
 
@@ -319,7 +319,7 @@ impl Terminal {
       // Match anything for end of stream, including the actual end of stream
       // (None) or any token (Some(_)). This is to allow parsing of only part
       // of the input stream.
-      Terminal::EndOfStream(span) => quote::quote_spanned!(span.span().into()=> _),
+      Terminal::EndOfStream(span) => quote::quote_spanned!(span.clone().data().into()=> _),
       Terminal::Epsilon(_) => unreachable!(),
       Terminal::Sym(sym) => {
         let tokens: proc_macro2::TokenStream = sym.tokens.clone().into();
@@ -835,7 +835,7 @@ impl Display for ProductionRule {
 #[derive(Clone, Debug)]
 pub struct Constructor {
   pub group: proc_macro::Group,
-  span: TransparentSpan,
+  span: Transparent<Span>,
 }
 
 impl Constructor {
@@ -847,7 +847,7 @@ impl Constructor {
   }
 
   pub fn span(&self) -> Span {
-    self.span.span()
+    self.span.clone().data()
   }
 }
 
@@ -886,7 +886,7 @@ impl Display for Constructor {
 pub struct ProductionRules {
   pub rules: Vec<ProductionRule>,
   pub constructor: Option<Constructor>,
-  span: TransparentSpan,
+  span: Transparent<Span>,
 }
 
 impl ProductionRules {
@@ -913,7 +913,7 @@ impl ProductionRules {
   }
 
   pub fn span(&self) -> Span {
-    self.span.span()
+    self.span.clone().data()
   }
 
   /// Hash function considering only the types of elements in the rules list,
@@ -1059,7 +1059,7 @@ pub struct ProductionRuleRef {
   prod_ref: ProductionRef,
   prod_ptr: Rc<Production>,
   rule_idx: u32,
-  span: TransparentSpan,
+  span: Transparent<Span>,
 }
 
 impl ProductionRuleRef {
@@ -1077,7 +1077,7 @@ impl ProductionRuleRef {
   }
 
   pub fn span(&self) -> Span {
-    self.span.span
+    self.span.clone().data()
   }
 
   pub fn prod_ref(&self) -> &ProductionRef {

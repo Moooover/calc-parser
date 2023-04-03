@@ -2,13 +2,12 @@
 
 extern crate proc_macro;
 mod code_gen;
-mod lr_table;
+mod lr_table_builder;
 mod production;
 mod symbol;
-mod unique_rc;
 mod util;
 
-use lr_table::LRTable;
+use lr_table_builder::LRTable;
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 use production::Grammar;

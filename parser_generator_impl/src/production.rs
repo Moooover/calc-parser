@@ -185,46 +185,6 @@ impl Display for ParserName {
   }
 }
 
-// #[derive(Clone, Debug)]
-// pub struct TransparentSpan {
-//   span: Span,
-// }
-
-// impl TransparentSpan {
-//   pub fn span(&self) -> Span {
-//     self.span
-//   }
-// }
-
-// impl From<Span> for TransparentSpan {
-//   fn from(span: Span) -> Self {
-//     Self { span }
-//   }
-// }
-// impl Hash for TransparentSpan {
-//   fn hash<H: Hasher>(&self, _state: &mut H) {}
-// }
-
-// impl PartialEq for TransparentSpan {
-//   fn eq(&self, _other: &Self) -> bool {
-//     true
-//   }
-// }
-
-// impl Eq for TransparentSpan {}
-
-// impl PartialOrd for TransparentSpan {
-//   fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-//     Some(std::cmp::Ordering::Equal)
-//   }
-// }
-
-// impl Ord for TransparentSpan {
-//   fn cmp(&self, _other: &Self) -> std::cmp::Ordering {
-//     std::cmp::Ordering::Equal
-//   }
-// }
-
 #[derive(Clone, Debug)]
 pub struct TerminalSym {
   pub tokens: TokenStream,
@@ -470,10 +430,6 @@ impl ProductionName {
     &self.name
   }
 
-  pub fn span(&self) -> Span {
-    self.span
-  }
-
   pub fn has_type_spec(&self) -> bool {
     self.type_spec.is_some()
   }
@@ -597,10 +553,6 @@ impl ProductionRef {
       alias: None,
       span: prod_ptr.upgrade().unwrap().span,
     }
-  }
-
-  pub fn span(&self) -> Span {
-    self.span
   }
 
   pub fn name(&self) -> String {
@@ -835,19 +787,15 @@ impl Display for ProductionRule {
 #[derive(Clone, Debug)]
 pub struct Constructor {
   pub group: proc_macro::Group,
-  span: Transparent<Span>,
+  _span: Transparent<Span>,
 }
 
 impl Constructor {
   pub fn new(group: proc_macro::Group, span: Span) -> Self {
     Self {
       group,
-      span: span.into(),
+      _span: span.into(),
     }
-  }
-
-  pub fn span(&self) -> Span {
-    self.span.clone().data()
   }
 }
 
@@ -856,7 +804,7 @@ impl std::default::Default for Constructor {
   fn default() -> Self {
     Self {
       group: proc_macro::Group::new(proc_macro::Delimiter::Brace, quote! { () }.into()),
-      span: proc_macro::Span::call_site().into(),
+      _span: proc_macro::Span::call_site().into(),
     }
   }
 }

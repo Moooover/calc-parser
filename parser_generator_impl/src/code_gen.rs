@@ -57,7 +57,7 @@ impl ConstructorContext {
           };
           var_alias_map.insert(var_ref, var_name.clone());
         }
-        ProductionRule::Terminal(term) => {
+        ProductionRule::Terminal(_term) => {
           // TODO also capture terminals with aliases, not just indexes.
         }
       }
@@ -141,7 +141,6 @@ impl ConstructorContext {
 }
 
 struct CodeGen<'a> {
-  grammar: &'a Grammar,
   lr_table: &'a LRTable,
 
   parser_name: syn::Ident,
@@ -161,7 +160,6 @@ impl<'a> CodeGen<'a> {
     let root_type = grammar.starting_rule().deref().name.type_spec_as_type();
 
     Self {
-      grammar,
       lr_table,
       parser_name,
       dfa_name,
@@ -250,7 +248,10 @@ impl<'a> CodeGen<'a> {
   }
 
   fn unique_var(uid: usize) -> proc_macro2::TokenStream {
-    let ident = syn::Ident::new(&format!("v{}", uid), proc_macro2::Span::call_site());
+    let ident = syn::Ident::new(
+      &format!("__parser_generator_impl_v{}", uid),
+      proc_macro2::Span::call_site(),
+    );
     quote! {
       #ident
     }
@@ -358,9 +359,9 @@ impl<'a> CodeGen<'a> {
             // state consumed.
             let var_builders = rules.iter().enumerate().rev().fold(
               proc_macro2::TokenStream::new(),
-              |tokens, (rule_idx, prod_rule)| {
+              |tokens, (rule_idx, _prod_rule)| {
                 let var_name = Self::unique_var(rule_idx);
-                let var_str = var_name.to_string();
+                // let var_str = var_name.to_string();
 
                 // States can be reached via multiple paths through the dfa if
                 // they or their ancestors were merged, so we need to match
@@ -420,7 +421,7 @@ impl<'a> CodeGen<'a> {
                   }
                   let next_lr_state = next_lr_entry_ptr.unwrap().lr_state();
                   let next_enum_variant = self.to_enum_inst(next_lr_state);
-                  let evstr = next_enum_variant.to_string();
+                  // let evstr = next_enum_variant.to_string();
 
                   quote! {
                     #tokens
